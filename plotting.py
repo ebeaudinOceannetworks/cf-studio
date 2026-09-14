@@ -36,29 +36,46 @@ def apply_export_chrome(
     attribution=None,
     attribution_position="footer",
     attribution_fontsize=8,
+    fontsize=11,
     paper="light",
 ):
     bg = "#ffffff"
     fg = "#143028"
+    fs = float(fontsize or 11)
+    title_fs = fs + 2
     fig.patch.set_facecolor(bg)
     for ax in fig.axes:
         ax.set_facecolor("#ffffff")
-        ax.tick_params(colors=fg)
+        ax.tick_params(colors=fg, labelsize=fs)
         ax.xaxis.label.set_color(fg)
         ax.yaxis.label.set_color(fg)
         ax.title.set_color(fg)
+        ax.xaxis.label.set_fontsize(fs)
+        ax.yaxis.label.set_fontsize(fs)
+        ax.title.set_fontsize(title_fs)
+        ax.xaxis.offsetText.set_fontsize(fs)
+        ax.yaxis.offsetText.set_fontsize(fs)
         for spine in ax.spines.values():
             spine.set_color(fg)
-        if hasattr(ax, "get_legend") and ax.get_legend():
-            for text in ax.get_legend().get_texts():
+        legend = ax.get_legend()
+        if legend:
+            for text in legend.get_texts():
                 text.set_color(fg)
+                text.set_fontsize(fs)
+            if legend.get_title():
+                legend.get_title().set_fontsize(fs)
+        for txt in ax.texts:
+            txt.set_fontsize(fs)
+
+    for txt in fig.texts:
+        txt.set_fontsize(fs)
 
     if title and fig.axes:
-        fig.axes[0].set_title(title)
+        fig.axes[0].set_title(title, fontsize=title_fs)
     if xlabel and fig.axes:
-        fig.axes[0].set_xlabel(xlabel)
+        fig.axes[0].set_xlabel(xlabel, fontsize=fs)
     if ylabel and fig.axes:
-        fig.axes[0].set_ylabel(ylabel)
+        fig.axes[0].set_ylabel(ylabel, fontsize=fs)
 
     if attribution and fig.axes:
         ha = "center"
@@ -694,6 +711,7 @@ def render_plot(ds, plot_type, selected_ids, variable, style):
         attribution=style.get("attribution") if style.get("show_attribution") else None,
         attribution_position=style.get("attribution_position", "footer"),
         attribution_fontsize=style.get("attribution_fontsize", 8),
+        fontsize=style.get("fontsize", 11),
         paper=style.get("paper", "light"),
     )
     return fig

@@ -129,6 +129,7 @@ export default function PlotWidget({
   const [fileName, setFileName] = useState('');
   const [attrPosition, setAttrPosition] = useState('footer');
   const [attrFontSize, setAttrFontSize] = useState('8');
+  const [fontSize, setFontSize] = useState('11');
 
   const [plotData, setPlotData] = useState<any>(null);
   const [plotRev, setPlotRev] = useState(0);
@@ -185,6 +186,7 @@ export default function PlotWidget({
     show_attribution: showAttribution,
     attribution_position: attrPosition,
     attribution_fontsize: Number(attrFontSize) || 8,
+    fontsize: Number(fontSize) || 11,
     fig_width: Number(figWidth) || 10,
     fig_height: Number(figHeight) || 6,
     dpi: Number(dpi) || 300,
@@ -254,6 +256,7 @@ export default function PlotWidget({
     if (!plotData) return [];
     const lineW = Number(lineWidth) || 2.5;
     const mSize = Number(markerSize) || 8;
+    const fs = Number(fontSize) || 11;
 
     if (plotData.plot_type === 'transect') {
       const isPixelMesh = plotType.includes('Pixel Mesh');
@@ -266,9 +269,9 @@ export default function PlotWidget({
         zmin: plotData.vmin ?? undefined,
         zmax: plotData.vmax ?? undefined,
         colorbar: {
-          title: { text: colorbarLabel || `${plotData.primary_var} (${plotData.units_primary})` },
-          tickfont: { color: '#143028' },
-          titlefont: { color: '#143028' },
+          title: { text: colorbarLabel || `${plotData.primary_var} (${plotData.units_primary})`, font: { color: '#143028', size: fs } },
+          tickfont: { color: '#143028', size: fs },
+          titlefont: { color: '#143028', size: fs },
           len: 0.8,
           thickness: 16,
           outlinewidth: 0,
@@ -292,7 +295,7 @@ export default function PlotWidget({
           contours: {
             coloring: 'lines',
             showlabels: overlayLabels,
-            labelfont: { color: overlayStroke, size: 11 },
+            labelfont: { color: overlayStroke, size: fs },
           },
           line: { color: overlayStroke, width: 1.6 },
         });
@@ -392,8 +395,8 @@ export default function PlotWidget({
           size: mSize,
           opacity: 0.75,
           colorbar: {
-            title: { text: colorbarLabel || plotData.colorbar_title || '' },
-            tickfont: { color: '#143028' },
+            title: { text: colorbarLabel || plotData.colorbar_title || '', font: { color: '#143028', size: fs } },
+            tickfont: { color: '#143028', size: fs },
             thickness: 16,
             outlinewidth: 0,
             x: 1.02,
@@ -457,21 +460,32 @@ export default function PlotWidget({
   };
 
   const generateLayout = () => {
-    const axis = { color: '#143028', gridcolor: '#e2ebe7', zerolinecolor: '#c5d4cc', linecolor: '#143028' };
-    const viewKey = `${id}|${plotType}|${plotIds.join('|')}|${effectiveDate}|${activeVar}`;
+    const fs = Number(fontSize) || 11;
+    const axis = {
+      color: '#143028',
+      gridcolor: '#e2ebe7',
+      zerolinecolor: '#c5d4cc',
+      linecolor: '#143028',
+      tickfont: { size: fs, color: '#143028' },
+      title: { font: { size: fs, color: '#143028' } },
+    };
+    const viewKey = `${id}|${plotType}|${plotIds.join('|')}|${effectiveDate}|${activeVar}|${fs}`;
     const depthRange = (plotData?.depth_max != null)
       ? [plotData.depth_max, plotData.depth_min ?? 0]
       : undefined;
+    const legendFont = { font: { size: fs, color: '#143028' }, bgcolor: 'rgba(255,255,255,0.85)', borderwidth: 0 };
+    const axisTitle = (text: string) => ({ text, font: { size: fs, color: '#143028' } });
     const base: any = {
       autosize: true,
       margin: { t: 40, b: showAttribution ? 56 : 40, l: 56, r: show.colorbar ? 88 : 30 },
       paper_bgcolor: '#ffffff',
       plot_bgcolor: '#ffffff',
-      font: { color: '#143028', size: 11 },
+      font: { color: '#143028', size: fs },
       uirevision: viewKey,
       xaxis: { ...axis },
       yaxis: { ...axis },
-      title: title ? { text: title, font: { size: 14 } } : undefined,
+      legend: legendFont,
+      title: title ? { text: title, font: { size: fs + 3 } } : undefined,
     };
 
     if (plotData?.plot_type === 'transect') {
@@ -488,12 +502,12 @@ export default function PlotWidget({
         },
         xaxis: {
           ...axis,
-          title: { text: xlabel || 'Distance along transect (km)' },
+          title: axisTitle(xlabel || 'Distance along transect (km)'),
           range: [0, lastX],
         },
         yaxis: {
           ...axis,
-          title: { text: ylabel || 'Depth (m)' },
+          title: axisTitle(ylabel || 'Depth (m)'),
           autorange: depthRange ? false : 'reversed',
           range: depthRange,
         },
@@ -521,7 +535,7 @@ export default function PlotWidget({
             showarrow: false,
             yanchor: 'bottom',
             xanchor: 'center',
-            font: { size: 11, color: '#143028' },
+            font: { size: fs, color: '#143028' },
           }];
         }),
       };
@@ -531,12 +545,12 @@ export default function PlotWidget({
         ...base,
         showlegend: plotData.plot_type !== 'overview',
         legend: plotData.plot_type === 'profile'
-          ? { x: 0.98, y: 0.02, xanchor: 'right', yanchor: 'bottom', bgcolor: 'rgba(255,255,255,0.85)', borderwidth: 0 }
-          : { bgcolor: 'rgba(255,255,255,0.85)', borderwidth: 0 },
-        xaxis: { ...axis, title: { text: xlabel || `${plotData.variable} (${plotData.units})` } },
+          ? { ...legendFont, x: 0.98, y: 0.02, xanchor: 'right', yanchor: 'bottom' }
+          : legendFont,
+        xaxis: { ...axis, title: axisTitle(xlabel || `${plotData.variable} (${plotData.units})`) },
         yaxis: {
           ...axis,
-          title: { text: ylabel || 'Depth (m)' },
+          title: axisTitle(ylabel || 'Depth (m)'),
           autorange: depthRange ? false : 'reversed',
           range: depthRange,
         },
@@ -545,8 +559,8 @@ export default function PlotWidget({
     if (plotData?.plot_type === 'ts') {
       return {
         ...base,
-        xaxis: { ...axis, title: { text: xlabel || 'Practical Salinity (psu)' } },
-        yaxis: { ...axis, title: { text: ylabel || 'Temperature (°C)' }, autorange: true },
+        xaxis: { ...axis, title: axisTitle(xlabel || 'Practical Salinity (psu)') },
+        yaxis: { ...axis, title: axisTitle(ylabel || 'Temperature (°C)'), autorange: true },
         showlegend: plotData.color_mode === 'season',
       };
     }
@@ -555,9 +569,9 @@ export default function PlotWidget({
         ...base,
         barmode: 'stack',
         showlegend: true,
-        legend: { bgcolor: 'rgba(255,255,255,0.85)', borderwidth: 0 },
-        xaxis: { ...axis, title: { text: xlabel || 'Date' } },
-        yaxis: { ...axis, title: { text: ylabel || '# of casts' }, autorange: true },
+        legend: legendFont,
+        xaxis: { ...axis, title: axisTitle(xlabel || 'Date') },
+        yaxis: { ...axis, title: axisTitle(ylabel || '# of casts'), autorange: true },
       };
     }
     if (plotData?.plot_type === 'distribution') {
@@ -570,8 +584,8 @@ export default function PlotWidget({
       (plotData.panels || []).forEach((p: any, i: number) => {
         const xkey = i === 0 ? 'xaxis' : `xaxis${i + 1}`;
         const ykey = i === 0 ? 'yaxis' : `yaxis${i + 1}`;
-        layout[xkey] = { ...axis, title: { text: variableXLabel(p.variable, p.units), font: { size: 10 } } };
-        layout[ykey] = { ...axis, title: { text: 'Count', font: { size: 10 } } };
+        layout[xkey] = { ...axis, title: axisTitle(variableXLabel(p.variable, p.units)) };
+        layout[ykey] = { ...axis, title: axisTitle('Count') };
       });
       return layout;
     }
@@ -667,6 +681,19 @@ export default function PlotWidget({
             <input type="checkbox" checked={showAttribution} onChange={(e) => setShowAttribution(e.target.checked)} />
             Attribution
           </label>
+          <label className="check font-size-ctrl">
+            Font
+            <input
+              className="input"
+              type="number"
+              min="8"
+              max="28"
+              step="1"
+              value={fontSize}
+              onChange={(e) => setFontSize(e.target.value)}
+              aria-label="Font size"
+            />
+          </label>
         </div>
         <div className="widget-controls">
           <button type="button" className="btn btn-ghost" onClick={() => setStudioOpen((v) => !v)}>
@@ -723,6 +750,7 @@ export default function PlotWidget({
           <label>Title<input className="input" value={title} onChange={(e) => setTitle(e.target.value)} /></label>
           <label>X label<input className="input" value={xlabel} onChange={(e) => setXlabel(e.target.value)} /></label>
           <label>Y label<input className="input" value={ylabel} onChange={(e) => setYlabel(e.target.value)} /></label>
+          <label>Font size<input className="input" type="number" min="8" max="28" step="1" value={fontSize} onChange={(e) => setFontSize(e.target.value)} /></label>
           {show.colorbar && <label>Colorbar<input className="input" value={colorbarLabel} onChange={(e) => setColorbarLabel(e.target.value)} /></label>}
           {show.depth && <label>Depth min<input className="input" value={depthMin} onChange={(e) => setDepthMin(e.target.value)} /></label>}
           {show.depth && <label>Depth max<input className="input" value={depthMax} onChange={(e) => setDepthMax(e.target.value)} /></label>}

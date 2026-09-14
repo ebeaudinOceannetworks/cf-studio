@@ -112,6 +112,7 @@ class PlotStyle(BaseModel):
     show_attribution: bool = False
     attribution_position: str = "footer"
     attribution_fontsize: float = 8
+    fontsize: float = 11
     fig_width: float = 10
     fig_height: float = 6
     dpi: int = 300
@@ -181,6 +182,7 @@ def style_dict(req: PlotStyle, attribution_text: str):
         "show_attribution": req.show_attribution,
         "attribution_position": req.attribution_position,
         "attribution_fontsize": req.attribution_fontsize,
+        "fontsize": req.fontsize,
         "fig_width": req.fig_width,
         "fig_height": req.fig_height,
         "attribution": attribution_text,

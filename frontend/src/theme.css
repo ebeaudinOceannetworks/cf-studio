@@ -291,6 +291,11 @@ html, body, #root {
   padding: 4px 8px;
   font-size: 0.82em;
 }
+.font-size-ctrl input {
+  width: 52px;
+  padding: 4px 6px;
+  margin: 0;
+}
 
 .check {
   font-size: 0.78em;

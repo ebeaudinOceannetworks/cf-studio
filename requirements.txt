@@ -4,5 +4,6 @@ numpy>=1.24.0
 matplotlib>=3.7.0
 gsw>=3.6.0
 cmocean>=4.0.0
-fastapi
-uvicorn
+fastapi==0.141.1
+uvicorn==0.52.4
+

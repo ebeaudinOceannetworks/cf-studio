@@ -42,6 +42,70 @@ function stationTopLabel(name: string) {
   return parts[0] || '';
 }
 
+function wrapAttribution(text: string, widthChars: number) {
+  const words = String(text || '').split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let line = '';
+  for (const word of words) {
+    const next = line ? `${line} ${word}` : word;
+    if (next.length > widthChars && line) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = next;
+    }
+  }
+  if (line) lines.push(line);
+  return lines.join('<br>');
+}
+
+function jpegDataUrlToPdf(dataUrl: string, widthPx: number, heightPx: number, dpi: number) {
+  const comma = dataUrl.indexOf(',');
+  const raw = atob(comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl);
+  const bytes = Uint8Array.from(raw, (c) => c.charCodeAt(0));
+  const wPt = (widthPx * 72) / dpi;
+  const hPt = (heightPx * 72) / dpi;
+  const encoder = new TextEncoder();
+  const parts: Uint8Array[] = [];
+  const offsets = [0];
+  let pos = 0;
+  const pushStr = (s: string) => {
+    const b = encoder.encode(s);
+    parts.push(b);
+    pos += b.length;
+  };
+  const pushBytes = (b: Uint8Array) => {
+    parts.push(b);
+    pos += b.length;
+  };
+  pushStr('%PDF-1.4\n');
+  offsets.push(pos);
+  pushStr('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n');
+  offsets.push(pos);
+  pushStr('2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n');
+  offsets.push(pos);
+  pushStr(`3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${wPt.toFixed(2)} ${hPt.toFixed(2)}] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>\nendobj\n`);
+  offsets.push(pos);
+  pushStr(`4 0 obj\n<< /Type /XObject /Subtype /Image /Width ${widthPx} /Height ${heightPx} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${bytes.length} >>\nstream\n`);
+  pushBytes(bytes);
+  pushStr('\nendstream\nendobj\n');
+  offsets.push(pos);
+  const content = `q ${wPt.toFixed(2)} 0 0 ${hPt.toFixed(2)} 0 0 cm /Im0 Do Q`;
+  pushStr(`5 0 obj\n<< /Length ${content.length} >>\nstream\n${content}\nendstream\nendobj\n`);
+  const xref = pos;
+  let table = 'xref\n0 6\n0000000000 65535 f \n';
+  for (let i = 1; i <= 5; i++) table += `${String(offsets[i]).padStart(10, '0')} 00000 n \n`;
+  pushStr(table);
+  pushStr(`trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`);
+  const out = new Uint8Array(pos);
+  let o = 0;
+  for (const p of parts) {
+    out.set(p, o);
+    o += p.length;
+  }
+  return new Blob([out], { type: 'application/pdf' });
+}
+
 function withAlpha(color: string, a: number) {
   const rgb = color.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
   if (rgb) return `rgba(${rgb[1]}, ${rgb[2]}, ${rgb[3]}, ${a})`;
@@ -134,7 +198,6 @@ export default function PlotWidget({
   const [plotRev, setPlotRev] = useState(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   const kind = plotKind(plotType);
   const preset = PRESETS[kind] || PRESETS.overview;
@@ -142,19 +205,14 @@ export default function PlotWidget({
   const needsSelection = kind !== 'sampling' && kind !== 'distribution';
   const plotIds = selectedStations;
   const plotFrameRef = useRef<HTMLDivElement | null>(null);
+  const plotlyGd = useRef<any>(null);
   const fetchGen = useRef(0);
-  const previewGen = useRef(0);
-  const previewUrlRef = useRef<string | null>(null);
 
   const effectiveDate = dateApplies(selectedDate, availableDates) ? selectedDate : 'All';
   const dateOptions = useMemo(() => {
     if (effectiveDate === 'All' || availableDates.some((d) => d.date === effectiveDate)) return availableDates;
     return [{ date: effectiveDate, label: effectiveDate }, ...availableDates];
   }, [availableDates, effectiveDate]);
-
-  useEffect(() => () => {
-    if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
-  }, []);
 
   useEffect(() => { setSelectedDate(globalDate); }, [globalDate]);
   useEffect(() => {
@@ -200,7 +258,6 @@ export default function PlotWidget({
   });
 
   useEffect(() => {
-    if (studioOpen) return;
     if (needsSelection && plotIds.length === 0) {
       fetchGen.current += 1;
       setPlotData(null);
@@ -238,76 +295,10 @@ export default function PlotWidget({
         if (gen === fetchGen.current) setLoading(false);
       });
     return () => ac.abort();
-  }, [studioOpen, plotIds.join('|'), activeVar, secondaryVar, plotType, effectiveDate, colorBy, depthMin, depthMax, vmin, vmax, colormap, numStd, needsSelection]);
+  }, [plotIds.join('|'), activeVar, secondaryVar, plotType, effectiveDate, colorBy, depthMin, depthMax, vmin, vmax, colormap, numStd, needsSelection]);
 
   useEffect(() => {
-    if (!studioOpen) {
-      previewGen.current += 1;
-      if (previewUrlRef.current) {
-        URL.revokeObjectURL(previewUrlRef.current);
-        previewUrlRef.current = null;
-      }
-      setPreviewUrl(null);
-      return;
-    }
-    if (needsSelection && plotIds.length === 0) {
-      previewGen.current += 1;
-      if (previewUrlRef.current) {
-        URL.revokeObjectURL(previewUrlRef.current);
-        previewUrlRef.current = null;
-      }
-      setPreviewUrl(null);
-      setErrorMsg(null);
-      setLoading(false);
-      return;
-    }
-    const gen = ++previewGen.current;
-    const ac = new AbortController();
-    setLoading(true);
-    const timer = window.setTimeout(() => {
-      fetch('/api/export', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...stylePayload(), format: 'png' }),
-        signal: ac.signal,
-      })
-        .then(async (res) => {
-          if (!res.ok) {
-            const err = await res.json().catch(() => ({ detail: res.statusText }));
-            throw new Error(err.detail || 'Preview failed');
-          }
-          return res.blob();
-        })
-        .then((blob) => {
-          if (gen !== previewGen.current) return;
-          const url = URL.createObjectURL(blob);
-          if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
-          previewUrlRef.current = url;
-          setPreviewUrl(url);
-          setErrorMsg(null);
-        })
-        .catch((err) => {
-          if (err.name === 'AbortError' || gen !== previewGen.current) return;
-          setErrorMsg(err.message);
-          setPreviewUrl(null);
-        })
-        .finally(() => {
-          if (gen === previewGen.current) setLoading(false);
-        });
-    }, 280);
-    return () => {
-      window.clearTimeout(timer);
-      ac.abort();
-    };
-  }, [
-    studioOpen, plotIds.join('|'), activeVar, secondaryVar, plotType, effectiveDate, colorBy,
-    title, xlabel, ylabel, colorbarLabel, depthMin, depthMax, vmin, vmax, colormap,
-    numContours, numDensity, overlayColor, overlayLabels, numStd, markerSize, lineWidth,
-    figWidth, figHeight, dpi, showAttribution, attrFontSize, fontSize, needsSelection,
-  ]);
-
-  useEffect(() => {
-    if (!visible || studioOpen) return;
+    if (!visible) return;
     const frame = plotFrameRef.current;
     const resize = () => {
       const gd = frame?.querySelector('.js-plotly-plot') as any;
@@ -323,7 +314,7 @@ export default function PlotWidget({
       window.clearTimeout(t2);
       ro?.disconnect();
     };
-  }, [visible, plotData, studioOpen]);
+  }, [visible, plotData]);
 
   const generatePlotlyTraces = () => {
     if (!plotData) return [];
@@ -736,6 +727,46 @@ export default function PlotWidget({
     return base;
   };
 
+  const layoutWithAttribution = () => {
+    const layout = generateLayout();
+    const text = plotData?.attribution;
+    if (!showAttribution || !text) return layout;
+    const axisFs = Number(fontSize) || 11;
+    const attrFs = Number(attrFontSize) || 8;
+    const wrapped = wrapAttribution(text, 52);
+    const nlines = wrapped.split('<br>').length;
+    const xlabelRoom = Math.round(axisFs * 2.5 + 32);
+    const attrRoom = nlines * (attrFs + 6) + 10;
+    const next: any = {
+      ...layout,
+      margin: { ...layout.margin, b: xlabelRoom + attrRoom },
+      annotations: [
+        ...(layout.annotations || []),
+        {
+          text: wrapped,
+          xref: 'paper',
+          yref: 'paper',
+          x: 0.5,
+          y: 0,
+          xanchor: 'center',
+          yanchor: 'top',
+          yshift: -xlabelRoom,
+          showarrow: false,
+          font: { size: attrFs, color: '#143028', style: 'italic' },
+          align: 'center',
+        },
+      ],
+    };
+    for (const key of Object.keys(next)) {
+      if (key === 'xaxis' || /^xaxis\d+$/.test(key)) {
+        const ax = next[key] || {};
+        const title = typeof ax.title === 'object' && ax.title ? ax.title : { text: ax.title };
+        next[key] = { ...ax, automargin: false, title: { ...title, standoff: 12 } };
+      }
+    }
+    return next;
+  };
+
   const downloadName = () => {
     let base = (fileName.trim() || title.trim() || 'cf-plot');
     base = base.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-').replace(/\.+$/, '').trim();
@@ -748,17 +779,23 @@ export default function PlotWidget({
     setSaving(true);
     setErrorMsg(null);
     try {
-      const payload = { ...stylePayload(), show_attribution: showAttribution };
-      const res = await fetch('/api/export', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: res.statusText }));
-        throw new Error(err.detail || 'Export failed');
+      const Plotly = (window as any).Plotly;
+      const gd = plotlyGd.current || plotFrameRef.current?.querySelector('.js-plotly-plot');
+      if (!gd || !Plotly?.toImage) throw new Error('Plot is not ready yet.');
+      const d = Number(dpi) || 300;
+      const scale = Math.max(1, d / 96);
+      const cssW = Math.max(1, gd._fullLayout?.width || gd.clientWidth || 800);
+      const cssH = Math.max(1, gd._fullLayout?.height || gd.clientHeight || 600);
+      const width = Math.round(cssW * scale);
+      const height = Math.round(cssH * scale);
+      const fmt = exportFormat === 'pdf' ? 'jpeg' : exportFormat;
+      const img = await Plotly.toImage(gd, { format: fmt, width: cssW, height: cssH, scale });
+      let blob: Blob;
+      if (exportFormat === 'pdf') {
+        blob = jpegDataUrlToPdf(img, width, height, d);
+      } else {
+        blob = await (await fetch(img)).blob();
       }
-      const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -828,7 +865,7 @@ export default function PlotWidget({
         </div>
         <div className="widget-controls">
           <button type="button" className="btn btn-ghost" onClick={() => setStudioOpen((v) => !v)}>
-            {studioOpen ? 'Inspect' : 'Customize'}
+            {studioOpen ? 'Hide options' : 'Customize'}
           </button>
           <span className="file-name-wrap">
             <input
@@ -850,23 +887,8 @@ export default function PlotWidget({
       <div className={`plot-canvas ${preset.canvas}`}>
         {errorMsg ? (
           <p className="plot-error">{errorMsg}</p>
-        ) : studioOpen && previewUrl ? (
-          <div className="plot-area">
-            <div
-              className="plot-frame"
-              ref={plotFrameRef}
-              style={{
-                ['--plot-w']: String(Number(figWidth) || preset.w),
-                ['--plot-h']: String(Number(figHeight) || preset.h),
-              } as CSSProperties}
-            >
-              <img className="export-preview" src={previewUrl} alt="Export preview" />
-              {loading && <div className="plot-updating">Updating…</div>}
-            </div>
-          </div>
         ) : plotData ? (
-          <>
-            <div className="plot-area">
+          <div className="plot-area">
             <div
               className="plot-frame"
               ref={plotFrameRef}
@@ -878,18 +900,16 @@ export default function PlotWidget({
               <Plot
                 key={`plot-${plotRev}-${plotData.plot_type}-${overlayColor}-${overlayLabels}-${numDensity}-${numContours}`}
                 data={generatePlotlyTraces()}
-                layout={generateLayout()}
+                layout={layoutWithAttribution()}
                 config={{ responsive: true, displayModeBar: true }}
                 style={{ width: '100%', height: '100%' }}
                 useResizeHandler
+                onInitialized={(_fig: any, gd: any) => { plotlyGd.current = gd; }}
+                onUpdate={(_fig: any, gd: any) => { plotlyGd.current = gd; }}
               />
               {loading && <div className="plot-updating">Updating…</div>}
             </div>
-            </div>
-            {showAttribution && plotData.attribution && (
-              <div className="attribution-foot">{plotData.attribution}</div>
-            )}
-          </>
+          </div>
         ) : (
           <p className="muted">
             {needsSelection && plotIds.length === 0
@@ -945,7 +965,7 @@ export default function PlotWidget({
           </label>
           <label>Attribution size<input className="input" value={attrFontSize} onChange={(e) => setAttrFontSize(e.target.value)} /></label>
           <div className="studio-actions">
-            <span className="muted">This is the saved figure, {figWidth}×{figHeight} in at {dpi} DPI. Inspect to hover and zoom.</span>
+            <span className="muted">Save is this figure, at {dpi} DPI.</span>
           </div>
         </div>
       )}

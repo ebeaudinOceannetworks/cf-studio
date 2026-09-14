@@ -27,7 +27,8 @@ app.add_middleware(
 )
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_DATA_DIR = os.path.normpath(os.path.join(ROOT, "..", "data-test"))
+FOLDER_FILE = os.path.join(ROOT, "data_folder.txt")
+FALLBACK_DATA_DIR = os.path.normpath(os.path.join(ROOT, "..", "data-test"))
 FRONTEND_DIST = os.path.join(ROOT, "frontend", "dist")
 
 PLOT_TYPES = [
@@ -44,14 +45,36 @@ PLOT_TYPES = [
 ds_all = None
 
 
+def read_saved_folder() -> str:
+    try:
+        with open(FOLDER_FILE, encoding="utf-8") as f:
+            path = f.read().strip()
+        if path:
+            return os.path.expanduser(path)
+    except OSError:
+        pass
+    return FALLBACK_DATA_DIR
+
+
+def write_saved_folder(path: str) -> str:
+    path = os.path.abspath(os.path.expanduser(path.strip()))
+    with open(FOLDER_FILE, "w", encoding="utf-8") as f:
+        f.write(path + "\n")
+    return path
+
+
+current_folder = read_saved_folder()
+
+
 def load_data_from_path(path_dir: str):
-    global ds_all
+    global ds_all, current_folder
     ds_all, count = data.load_folder(path_dir)
+    current_folder = path_dir
     return count
 
 
 try:
-    load_data_from_path(DEFAULT_DATA_DIR)
+    load_data_from_path(current_folder)
 except Exception as e:
     print(f"Startup warning: {e}")
 
@@ -162,9 +185,20 @@ def style_dict(req: PlotStyle, attribution_text: str):
 def set_folder(req: FolderRequest):
     try:
         count = load_data_from_path(req.folder_path)
-        return {"status": "success", "file_count": count}
+        return {"status": "success", "file_count": count, "folder_path": current_folder}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/remember_folder")
+def remember_folder(req: FolderRequest):
+    path = os.path.abspath(os.path.expanduser((req.folder_path or "").strip()))
+    if not path:
+        raise HTTPException(status_code=400, detail="Folder path is empty")
+    if not os.path.isdir(path):
+        raise HTTPException(status_code=400, detail=f"Folder does not exist: {path}")
+    saved = write_saved_folder(path)
+    return {"status": "success", "folder_path": saved}
 
 
 @app.get("/api/summary")
@@ -177,7 +211,7 @@ def get_summary():
             "variables": [],
             "plot_types": PLOT_TYPES,
             "nations": [],
-            "default_folder": DEFAULT_DATA_DIR,
+            "default_folder": current_folder,
         }
 
     unique_markers, date_counts = {}, {}
@@ -267,7 +301,7 @@ def get_summary():
         "variables": sorted(detected_vars),
         "plot_types": PLOT_TYPES,
         "nations": sorted(list(all_nations)),
-        "default_folder": DEFAULT_DATA_DIR,
+        "default_folder": current_folder,
     }
 
 

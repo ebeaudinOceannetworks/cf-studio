@@ -3,13 +3,13 @@ import MapView from './Map';
 import PlotWidget from './PlotWidget';
 import DateHeatmap from './DateHeatmap';
 
-const DEFAULT_FOLDER = '/Users/ebeaudin/Desktop/CF/data-test';
-
 export default function App() {
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
-  const [folderPath, setFolderPath] = useState<string>(DEFAULT_FOLDER);
+  const [folderPath, setFolderPath] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
+  const [remembering, setRemembering] = useState<boolean>(false);
+  const [remembered, setRemembered] = useState<boolean>(false);
 
   const [selectedStations, setSelectedStations] = useState<string[]>([]);
   const [dateFilter, setDateFilter] = useState<string>('All');
@@ -66,6 +66,7 @@ export default function App() {
     e.preventDefault();
     setLoading(true);
     setError(null);
+    setRemembered(false);
     fetch('/api/load_folder', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -79,6 +80,25 @@ export default function App() {
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
+  };
+
+  const handleRememberPath = () => {
+    setRemembering(true);
+    setError(null);
+    setRemembered(false);
+    fetch('/api/remember_folder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ folder_path: folderPath }),
+    })
+      .then(async (res) => {
+        const resData = await res.json();
+        if (!res.ok) throw new Error(resData.detail || 'Failed to remember folder');
+        if (resData.folder_path) setFolderPath(resData.folder_path);
+        setRemembered(true);
+      })
+      .catch((err) => setError(err.message))
+      .finally(() => setRemembering(false));
   };
 
   const handleStationClick = (id: string, shiftKey: boolean) => {
@@ -121,12 +141,25 @@ export default function App() {
             className="input"
             type="text"
             value={folderPath}
-            onChange={(e) => setFolderPath(e.target.value)}
+            onChange={(e) => {
+              setFolderPath(e.target.value);
+              setRemembered(false);
+            }}
             style={{ marginBottom: 8 }}
           />
-          <button type="submit" className="btn btn-ocean" disabled={loading}>
-            {loading ? 'Scanning…' : 'Load folder'}
-          </button>
+          <div className="btn-row">
+            <button type="submit" className="btn btn-ocean" disabled={loading}>
+              {loading ? 'Scanning…' : 'Load folder'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-forest"
+              onClick={handleRememberPath}
+              disabled={remembering || !folderPath.trim()}
+            >
+              {remembering ? 'Saving…' : remembered ? 'Path saved' : 'Remember path'}
+            </button>
+          </div>
         </form>
 
         {error && <div className="error-box">{error}</div>}

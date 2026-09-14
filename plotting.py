@@ -9,6 +9,7 @@ from colors import STATION_COLOR, UNASSIGNED_COLOR, variable_color
 from data import (
     as_scalar,
     as_str,
+    cast_date,
     deepest_cast_per_station,
     get_units,
     match_casts,
@@ -169,7 +170,7 @@ def overview_casts_plot(
         is_latest = c == latest_c
         color = variable_color(var)
         if is_latest:
-            latest_label = str(pd.to_datetime(latest_t).date()) if latest_t is not None else str(c)
+            latest_label = cast_date(ds.sel(cast=latest_c)) if latest_c is not None else str(c)
             ax.plot(
                 vals[mask],
                 depths[mask],

@@ -377,7 +377,7 @@ def plot_overview_payload(req: PlotStyle, attribution_text: str):
     if not matching:
         return {"error": "No casts to display."}
 
-    latest_c, latest_t = plotting.latest_cast_id(ds_all, matching)
+    latest_c, _latest_t = plotting.latest_cast_id(ds_all, matching)
     traces = []
     for c in matching:
         c_ds = ds_all.sel(cast=c)
@@ -397,7 +397,9 @@ def plot_overview_payload(req: PlotStyle, attribution_text: str):
             "latest": c == latest_c,
         })
 
-    latest_date = str(pd.to_datetime(latest_t).date()) if latest_t is not None else None
+    latest_date = data.cast_date(ds_all.sel(cast=latest_c)) if latest_c is not None else None
+    if latest_date == "Unknown":
+        latest_date = None
     lo, hi = data.valid_depth_extent(ds_all, matching, req.variable, req.depth_min, req.depth_max)
     return {
         "plot_type": "overview",

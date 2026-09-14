@@ -163,24 +163,65 @@ def is_station_cast(cast_ds) -> bool:
     return c_type == "station" and st_name not in ("nan", "Unassigned Cast Data", "")
 
 
+DEFAULT_TZ = "America/Vancouver"
+
+# Community name first; lon/lat is the fallback for unassigned / unknown orgs.
+_COMMUNITY_TZ_NEEDLES = (
+    ("iqaluit", "America/Iqaluit"),
+    ("nunatsiavut", "America/Goose_Bay"),
+    ("innu nation", "America/Goose_Bay"),
+    ("maritime aboriginal", "America/Halifax"),
+)
+
+
+def timezone_for_location(lon=None, lat=None, community=None):
+    if community:
+        key = str(community).lower()
+        for needle, zone in _COMMUNITY_TZ_NEEDLES:
+            if needle in key:
+                return zone
+    try:
+        lon_f = float(lon)
+    except (TypeError, ValueError):
+        lon_f = float("nan")
+    try:
+        lat_f = float(lat)
+    except (TypeError, ValueError):
+        lat_f = float("nan")
+    if lon_f == lon_f:
+        if lon_f <= -110:
+            return "America/Vancouver"
+        if lat_f == lat_f and lat_f >= 60:
+            return "America/Iqaluit"
+        if lat_f == lat_f and lat_f >= 51:
+            return "America/Goose_Bay"
+        if lon_f <= -55:
+            return "America/Halifax"
+        return "America/St_Johns"
+    return DEFAULT_TZ
+
+
+def local_timestamp(raw, lon=None, lat=None, community=None):
+    ts = pd.to_datetime(raw, utc=True, errors="coerce")
+    if pd.isna(ts):
+        return ts
+    return ts.tz_convert(timezone_for_location(lon, lat, community))
+
+
 def sampling_day_counts(ds_sub):
-    sampling_days = np.unique(ds_sub.time.dt.floor("1D"))
-    dates = []
-    station_counts = []
-    unassigned_counts = []
-    for day in sampling_days:
-        day_ds = ds_sub.where(ds_sub.time.dt.floor("1D") == day, drop=True)
-        n_st = 0
-        n_un = 0
-        for c in np.ravel(day_ds.cast.values):
-            if is_station_cast(day_ds.sel(cast=c)):
-                n_st += 1
-            else:
-                n_un += 1
-        dates.append(str(pd.to_datetime(day).date()))
-        station_counts.append(int(n_st))
-        unassigned_counts.append(int(n_un))
-    return dates, station_counts, unassigned_counts
+    counts = {}
+    for c in np.ravel(ds_sub.cast.values):
+        cast_ds = ds_sub.sel(cast=c)
+        day = cast_date(cast_ds)
+        if day == "Unknown":
+            continue
+        bucket = counts.setdefault(day, [0, 0])
+        if is_station_cast(cast_ds):
+            bucket[0] += 1
+        else:
+            bucket[1] += 1
+    dates = sorted(counts)
+    return dates, [counts[d][0] for d in dates], [counts[d][1] for d in dates]
 
 
 def as_float(val):
@@ -191,7 +232,13 @@ def as_float(val):
 def cast_date(cast_ds):
     try:
         raw = as_scalar(cast_ds.time.values)
-        return str(pd.to_datetime(raw)).split("T")[0][:10]
+        lon = as_float(cast_ds.lon.values) if "lon" in cast_ds else None
+        lat = as_float(cast_ds.lat.values) if "lat" in cast_ds else None
+        community = as_str(cast_ds.community.values) if "community" in cast_ds else None
+        local = local_timestamp(raw, lon=lon, lat=lat, community=community)
+        if pd.isna(local):
+            return "Unknown"
+        return str(local.date())
     except Exception:
         return "Unknown"
 

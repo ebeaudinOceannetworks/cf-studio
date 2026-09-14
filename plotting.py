@@ -268,7 +268,7 @@ def transect_plot(
     ax=None,
     contour_type="contourf",
     date_filter="All",
-    num_contour_lines=20,
+    num_contour_lines=15,
     num_density_lines=5,
     secondary_variable=None,
     overlay_color="black",
@@ -334,7 +334,8 @@ def transect_plot(
         val_min -= 0.1
         val_max += 0.1
 
-    levels = np.linspace(val_min, val_max, max(2, int(num_contour_lines)))
+    n_levels = max(2, int(num_contour_lines or 15))
+    levels = np.linspace(val_min, val_max, n_levels + 1)
 
     if contour_type == "contourf":
         mesh = ax.contourf(cast_dist, data_transect.depth.values, Z, cmap=cmap, levels=levels, extend="both")
@@ -342,20 +343,6 @@ def transect_plot(
         mesh = ax.pcolormesh(
             cast_dist, data_transect.depth.values, Z, cmap=cmap, vmin=val_min, vmax=val_max
         )
-
-    if num_contour_lines and num_contour_lines > 0:
-        try:
-            ax.contour(
-                cast_dist,
-                data_transect.depth.values,
-                Z,
-                colors="k",
-                linestyles=":",
-                levels=int(num_contour_lines),
-                linewidths=0.5,
-            )
-        except Exception:
-            pass
 
     overlay_var = secondary_variable if secondary_variable and secondary_variable != "None" else None
     if (
@@ -638,7 +625,7 @@ def render_plot(ds, plot_type, selected_ids, variable, style):
             var=variable,
             contour_type=contour_type,
             date_filter=date_filter,
-            num_contour_lines=style.get("num_contour_lines", 50),
+            num_contour_lines=style.get("num_contour_lines", 15),
             num_density_lines=style.get("num_density_lines", 5),
             secondary_variable=style.get("secondary_variable"),
             overlay_color=style.get("overlay_color", "black"),

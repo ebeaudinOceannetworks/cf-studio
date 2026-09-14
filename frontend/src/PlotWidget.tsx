@@ -115,7 +115,7 @@ export default function PlotWidget({
   const [vmin, setVmin] = useState('');
   const [vmax, setVmax] = useState('');
   const [colormap, setColormap] = useState('auto');
-  const [numContours, setNumContours] = useState('50');
+  const [numContours, setNumContours] = useState('15');
   const [numDensity, setNumDensity] = useState('5');
   const [overlayColor, setOverlayColor] = useState<'black' | 'white'>('black');
   const [overlayLabels, setOverlayLabels] = useState(true);
@@ -175,7 +175,7 @@ export default function PlotWidget({
     vmin: vmin === '' ? null : Number(vmin),
     vmax: vmax === '' ? null : Number(vmax),
     colormap,
-    num_contour_lines: Number(numContours) || 20,
+    num_contour_lines: Number(numContours) || 15,
     num_density_lines: Number(numDensity) || 5,
     overlay_color: overlayColor,
     overlay_labels: overlayLabels,
@@ -260,6 +260,23 @@ export default function PlotWidget({
 
     if (plotData.plot_type === 'transect') {
       const isPixelMesh = plotType.includes('Pixel Mesh');
+      const nLevels = Math.max(2, Number(numContours) || 15);
+      const zmin = plotData.vmin;
+      const zmax = plotData.vmax;
+      const hasRange = zmin != null && zmax != null && Number(zmax) > Number(zmin);
+      const filledContours = isPixelMesh ? {} : {
+        ncontours: nLevels,
+        autocontour: !hasRange,
+        contours: hasRange
+          ? {
+              coloring: 'fill',
+              showlines: false,
+              start: Number(zmin),
+              end: Number(zmax),
+              size: (Number(zmax) - Number(zmin)) / nLevels,
+            }
+          : { coloring: 'fill', showlines: false },
+      };
       const traces: any[] = [{
         z: plotData.z_primary,
         x: plotData.x_dist,
@@ -268,6 +285,7 @@ export default function PlotWidget({
         colorscale: plotData.colorscale || 'Viridis',
         zmin: plotData.vmin ?? undefined,
         zmax: plotData.vmax ?? undefined,
+        ...filledContours,
         colorbar: {
           title: {
             text: colorbarLabel || `${plotData.primary_var} (${plotData.units_primary})`,
@@ -717,7 +735,7 @@ export default function PlotWidget({
           <>
             <div className="plot-frame" ref={plotFrameRef}>
               <Plot
-                key={`plot-${plotRev}-${plotData.plot_type}-${overlayColor}-${overlayLabels}-${numDensity}`}
+                key={`plot-${plotRev}-${plotData.plot_type}-${overlayColor}-${overlayLabels}-${numDensity}-${numContours}`}
                 data={generatePlotlyTraces()}
                 layout={generateLayout()}
                 config={{ responsive: true, displayModeBar: true }}
@@ -757,7 +775,9 @@ export default function PlotWidget({
               </select>
             </label>
           )}
-          {show.contours && <label>Contour lines<input className="input" value={numContours} onChange={(e) => setNumContours(e.target.value)} /></label>}
+          {show.contours && !plotType.includes('Pixel') && (
+            <label>Color levels<input className="input" value={numContours} onChange={(e) => setNumContours(e.target.value)} /></label>
+          )}
           {show.contours && secondaryVar !== 'None' && (
             <label>Overlay contours<input className="input" value={numDensity} onChange={(e) => setNumDensity(e.target.value)} /></label>
           )}

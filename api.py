@@ -101,7 +101,7 @@ class PlotStyle(BaseModel):
     vmax: Optional[float] = None
     colormap: Optional[str] = None
     color_by: Optional[str] = "Season"
-    num_contour_lines: int = 50
+    num_contour_lines: int = 15
     num_density_lines: int = 5
     overlay_color: str = "black"
     overlay_labels: bool = True

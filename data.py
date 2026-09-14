@@ -319,15 +319,25 @@ def resolve_transect_date(ds, selected_ids, var, date_filter):
     return str(pd.Series(all_dates).mode()[0])
 
 
-def deepest_cast_per_station(ds, cast_ids):
-    deepest = []
-    seen = set()
+def deepest_cast_per_station(ds, cast_ids, var=None):
+    best = {}
+    order = []
     for c in cast_ids:
-        st_name = as_str(ds.sel(cast=c).station_name.values)
-        if st_name not in seen:
-            seen.add(st_name)
-            deepest.append(c)
-    return deepest
+        cast_ds = ds.sel(cast=c)
+        st_name = as_str(cast_ds.station_name.values)
+        depths = np.ravel(cast_ds.depth.values)
+        if var is not None and var in cast_ds:
+            vals = np.ravel(cast_ds[var].values)
+            mask = np.isfinite(depths) & np.isfinite(vals)
+        else:
+            mask = np.isfinite(depths)
+        max_z = float(np.max(depths[mask])) if np.any(mask) else float("-inf")
+        if st_name not in best:
+            order.append(st_name)
+            best[st_name] = (c, max_z)
+        elif max_z > best[st_name][1]:
+            best[st_name] = (c, max_z)
+    return [best[st][0] for st in order]
 
 
 def transect_distances(lats, lons):
@@ -525,9 +535,11 @@ def load_folder(path_dir):
     if not os.path.exists(path_dir):
         raise ValueError(f"Directory path does not exist: {path_dir}")
 
-    cor_files = glob.glob(os.path.join(path_dir, "**", "*.cor"), recursive=True) + glob.glob(
-        os.path.join(path_dir, "**", "*.COR"), recursive=True
-    )
+    cor_files = [
+        path
+        for path in glob.glob(os.path.join(path_dir, "**", "*.cor"), recursive=True)
+        if os.path.basename(path).endswith(".cor")
+    ]
     if not cor_files:
         raise ValueError(f"No .cor files found in {path_dir}")
     return concatenate_casts(cor_files), len(cor_files)

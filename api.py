@@ -327,7 +327,7 @@ def plot_transect_payload(req: PlotStyle, attribution_text: str):
     if len(selected_casts) < 2:
         return {"error": f"Transect requires at least 2 casts on date: {date_filter}. Found {len(selected_casts)}."}
 
-    deepest = data.deepest_cast_per_station(ds_all, selected_casts)
+    deepest = data.deepest_cast_per_station(ds_all, selected_casts, req.variable)
     if len(deepest) < 2:
         return {"error": "Transect needs at least 2 selected stations."}
     data_transect = ds_all.sel(cast=deepest).transpose("depth", "cast")

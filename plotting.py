@@ -296,7 +296,7 @@ def transect_plot(
         )
         return fig
 
-    deepest_casts = deepest_cast_per_station(ds, selected_casts)
+    deepest_casts = deepest_cast_per_station(ds, selected_casts, var)
     if len(deepest_casts) < 2:
         ax.text(
             0.5,

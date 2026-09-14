@@ -644,7 +644,7 @@ def export_plot(req: PlotStyle):
         style = style_dict(req, attribution_text)
         fig = plotting.render_plot(ds_all, req.plot_type, req.selected_ids, req.variable, style)
         buf = io.BytesIO()
-        fig.savefig(buf, format=fmt, dpi=int(req.dpi or 300), facecolor=fig.get_facecolor(), bbox_inches="tight")
+        fig.savefig(buf, format=fmt, dpi=int(req.dpi or 300), facecolor=fig.get_facecolor())
         plt.close(fig)
         buf.seek(0)
         media = {"png": "image/png", "svg": "image/svg+xml", "pdf": "application/pdf"}[fmt]

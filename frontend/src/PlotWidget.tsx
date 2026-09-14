@@ -127,7 +127,6 @@ export default function PlotWidget({
   const [dpi, setDpi] = useState('300');
   const [exportFormat, setExportFormat] = useState('png');
   const [fileName, setFileName] = useState('');
-  const [attrPosition, setAttrPosition] = useState('footer');
   const [attrFontSize, setAttrFontSize] = useState('8');
   const [fontSize, setFontSize] = useState('11');
 
@@ -135,6 +134,7 @@ export default function PlotWidget({
   const [plotRev, setPlotRev] = useState(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   const kind = plotKind(plotType);
   const preset = PRESETS[kind] || PRESETS.overview;
@@ -143,12 +143,18 @@ export default function PlotWidget({
   const plotIds = selectedStations;
   const plotFrameRef = useRef<HTMLDivElement | null>(null);
   const fetchGen = useRef(0);
+  const previewGen = useRef(0);
+  const previewUrlRef = useRef<string | null>(null);
 
   const effectiveDate = dateApplies(selectedDate, availableDates) ? selectedDate : 'All';
   const dateOptions = useMemo(() => {
     if (effectiveDate === 'All' || availableDates.some((d) => d.date === effectiveDate)) return availableDates;
     return [{ date: effectiveDate, label: effectiveDate }, ...availableDates];
   }, [availableDates, effectiveDate]);
+
+  useEffect(() => () => {
+    if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+  }, []);
 
   useEffect(() => { setSelectedDate(globalDate); }, [globalDate]);
   useEffect(() => {
@@ -184,7 +190,7 @@ export default function PlotWidget({
     line_width: Number(lineWidth) || 2.5,
     paper: 'light',
     show_attribution: showAttribution,
-    attribution_position: attrPosition,
+    attribution_position: 'footer',
     attribution_fontsize: Number(attrFontSize) || 8,
     fontsize: Number(fontSize) || 11,
     fig_width: Number(figWidth) || 10,
@@ -194,6 +200,7 @@ export default function PlotWidget({
   });
 
   useEffect(() => {
+    if (studioOpen) return;
     if (needsSelection && plotIds.length === 0) {
       fetchGen.current += 1;
       setPlotData(null);
@@ -231,10 +238,76 @@ export default function PlotWidget({
         if (gen === fetchGen.current) setLoading(false);
       });
     return () => ac.abort();
-  }, [plotIds.join('|'), activeVar, secondaryVar, plotType, effectiveDate, colorBy, depthMin, depthMax, vmin, vmax, colormap, numStd, needsSelection]);
+  }, [studioOpen, plotIds.join('|'), activeVar, secondaryVar, plotType, effectiveDate, colorBy, depthMin, depthMax, vmin, vmax, colormap, numStd, needsSelection]);
 
   useEffect(() => {
-    if (!visible) return;
+    if (!studioOpen) {
+      previewGen.current += 1;
+      if (previewUrlRef.current) {
+        URL.revokeObjectURL(previewUrlRef.current);
+        previewUrlRef.current = null;
+      }
+      setPreviewUrl(null);
+      return;
+    }
+    if (needsSelection && plotIds.length === 0) {
+      previewGen.current += 1;
+      if (previewUrlRef.current) {
+        URL.revokeObjectURL(previewUrlRef.current);
+        previewUrlRef.current = null;
+      }
+      setPreviewUrl(null);
+      setErrorMsg(null);
+      setLoading(false);
+      return;
+    }
+    const gen = ++previewGen.current;
+    const ac = new AbortController();
+    setLoading(true);
+    const timer = window.setTimeout(() => {
+      fetch('/api/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...stylePayload(), format: 'png' }),
+        signal: ac.signal,
+      })
+        .then(async (res) => {
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({ detail: res.statusText }));
+            throw new Error(err.detail || 'Preview failed');
+          }
+          return res.blob();
+        })
+        .then((blob) => {
+          if (gen !== previewGen.current) return;
+          const url = URL.createObjectURL(blob);
+          if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+          previewUrlRef.current = url;
+          setPreviewUrl(url);
+          setErrorMsg(null);
+        })
+        .catch((err) => {
+          if (err.name === 'AbortError' || gen !== previewGen.current) return;
+          setErrorMsg(err.message);
+          setPreviewUrl(null);
+        })
+        .finally(() => {
+          if (gen === previewGen.current) setLoading(false);
+        });
+    }, 280);
+    return () => {
+      window.clearTimeout(timer);
+      ac.abort();
+    };
+  }, [
+    studioOpen, plotIds.join('|'), activeVar, secondaryVar, plotType, effectiveDate, colorBy,
+    title, xlabel, ylabel, colorbarLabel, depthMin, depthMax, vmin, vmax, colormap,
+    numContours, numDensity, overlayColor, overlayLabels, numStd, markerSize, lineWidth,
+    figWidth, figHeight, dpi, showAttribution, attrFontSize, fontSize, needsSelection,
+  ]);
+
+  useEffect(() => {
+    if (!visible || studioOpen) return;
     const frame = plotFrameRef.current;
     const resize = () => {
       const gd = frame?.querySelector('.js-plotly-plot') as any;
@@ -250,7 +323,7 @@ export default function PlotWidget({
       window.clearTimeout(t2);
       ro?.disconnect();
     };
-  }, [visible, plotData]);
+  }, [visible, plotData, studioOpen]);
 
   const generatePlotlyTraces = () => {
     if (!plotData) return [];
@@ -755,7 +828,7 @@ export default function PlotWidget({
         </div>
         <div className="widget-controls">
           <button type="button" className="btn btn-ghost" onClick={() => setStudioOpen((v) => !v)}>
-            {studioOpen ? 'Hide options' : 'Customize'}
+            {studioOpen ? 'Inspect' : 'Customize'}
           </button>
           <span className="file-name-wrap">
             <input
@@ -777,6 +850,20 @@ export default function PlotWidget({
       <div className={`plot-canvas ${preset.canvas}`}>
         {errorMsg ? (
           <p className="plot-error">{errorMsg}</p>
+        ) : studioOpen && previewUrl ? (
+          <div className="plot-area">
+            <div
+              className="plot-frame"
+              ref={plotFrameRef}
+              style={{
+                ['--plot-w']: String(Number(figWidth) || preset.w),
+                ['--plot-h']: String(Number(figHeight) || preset.h),
+              } as CSSProperties}
+            >
+              <img className="export-preview" src={previewUrl} alt="Export preview" />
+              {loading && <div className="plot-updating">Updating…</div>}
+            </div>
+          </div>
         ) : plotData ? (
           <>
             <div className="plot-area">
@@ -856,16 +943,9 @@ export default function PlotWidget({
               <option value="pdf">PDF</option>
             </select>
           </label>
-          <label>Attribution position
-            <select className="select" value={attrPosition} onChange={(e) => setAttrPosition(e.target.value)}>
-              <option value="footer">Footer</option>
-              <option value="bottom-left">Bottom left</option>
-              <option value="bottom-right">Bottom right</option>
-            </select>
-          </label>
           <label>Attribution size<input className="input" value={attrFontSize} onChange={(e) => setAttrFontSize(e.target.value)} /></label>
           <div className="studio-actions">
-            <span className="muted">Save uses {figWidth}×{figHeight} in at {dpi} DPI. Change size and format here, then use Save figure.</span>
+            <span className="muted">This is the saved figure, {figWidth}×{figHeight} in at {dpi} DPI. Inspect to hover and zoom.</span>
           </div>
         </div>
       )}

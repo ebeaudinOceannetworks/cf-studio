@@ -1,3 +1,5 @@
+import textwrap
+
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -78,37 +80,33 @@ def apply_export_chrome(
     if ylabel and fig.axes:
         fig.axes[0].set_ylabel(ylabel, fontsize=fs)
 
-    if attribution and fig.axes:
-        ha = "center"
-        x = 0.5
-        if attribution_position == "bottom-left":
-            ha, x = "left", 0.0
-        elif attribution_position == "bottom-right":
-            ha, x = "right", 1.0
-        fig.axes[0].annotate(
-            attribution,
-            xy=(x, 0),
-            xycoords="axes fraction",
-            xytext=(0, -28),
-            textcoords="offset points",
-            ha=ha,
-            va="top",
-            fontsize=attribution_fontsize,
-            color=fg,
-            style="italic",
-            annotation_clip=False,
-        )
-        fig.tight_layout()
-        fig.subplots_adjust(bottom=0.16)
-    else:
-        fig.tight_layout()
     has_top_labels = any(
         abs(float(t.get_position()[1]) - 1.02) < 1e-6
         for ax in fig.axes
         for t in ax.texts
     )
-    if has_top_labels:
-        fig.subplots_adjust(top=min(fig.subplotpars.top, 0.82))
+    attr_fs = float(attribution_fontsize or 8)
+    wrapped = ""
+    bottom = 0.08 if has_top_labels else 0.06
+    top = 0.82 if has_top_labels else 0.94
+    if attribution:
+        char_w_in = max(attr_fs * 0.42, 1.0) / 72
+        wrap_chars = max(28, int((fig.get_figwidth() * 0.9) / char_w_in))
+        wrapped = "\n".join(textwrap.wrap(str(attribution), width=wrap_chars)) or str(attribution)
+        nlines = wrapped.count("\n") + 1
+        bottom = max(0.14, 0.055 + 0.038 * nlines)
+    fig.tight_layout(rect=[0.02, bottom, 0.98, top])
+    if wrapped:
+        fig.text(
+            0.5,
+            0.02,
+            wrapped,
+            ha="center",
+            va="bottom",
+            fontsize=attr_fs,
+            color=fg,
+            style="italic",
+        )
     return fig
 
 

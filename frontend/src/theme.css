@@ -395,8 +395,18 @@ html, body, #root {
   font-size: 0.72em;
   color: var(--muted);
   font-style: italic;
+  text-align: center;
   border-top: 1px solid var(--border);
   padding: 4px 8px 6px;
+  background: #fff;
+}
+.export-preview {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
   background: #fff;
 }
 

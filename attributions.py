@@ -16,7 +16,7 @@ data_attributions = {
         "community_attr": "",
         "onc_attr": "custodian, owner, distributor",
     },
-    "Kitsumkalum Fish and Wildlike Operations": {
+    "Kitsumkalum Fish and Wildlife Operations": {
         "code": ["KK", "KZ", "CS"],
         "community_attr": "owner",
         "onc_attr": "custodian, distributor",
@@ -26,14 +26,14 @@ data_attributions = {
         "community_attr": "owner",
         "onc_attr": "custodian, distributor",
     },
-    "Nunatsiavut Goverment": {
+    "Nunatsiavut Government": {
         "code": ["NV", "BG", "RB", "SIB", "KF", "RAM", "TIB"],
         "community_attr": "owner",
         "onc_attr": "custodian, distributor",
     },
     "Pacheedaht First Nation": {
         "code": "PA",
-        "community_attr": "ownwer",
+        "community_attr": "owner",
         "onc_attr": "custodian, distributor",
     },
     "Prince Rupert Port Authority": {

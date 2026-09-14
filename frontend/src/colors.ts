@@ -16,7 +16,7 @@ const VARIABLE_UNITS: Record<string, string> = {
   nitrate: 'µmol L⁻¹',
   oxygen: 'µL L⁻¹',
   'oxygen concentration': 'µL L⁻¹',
-  'dissolved oxygen': 'µL L⁻¹',
+  'dissolved oxygen': 'mL L⁻¹',
   'oxygen saturation': '%',
   'sound speed': 'm s⁻¹',
   depth: 'm',

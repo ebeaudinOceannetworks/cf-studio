@@ -25,7 +25,7 @@ UNITS = {
     "sound speed": "m s⁻¹",
     "velocity": "m s⁻¹",
     "depth": "m",
-    "dissolved oxygen": "µL L⁻¹",
+    "dissolved oxygen": "mL L⁻¹",
     "turbidity": "NTU",
     "pressure": "dbar",
     "conductivity": "mS cm⁻¹",

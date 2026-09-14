@@ -332,6 +332,44 @@ html, body, #root {
   background: #fff;
 }
 
+.selected-list {
+  list-style: decimal;
+  padding-left: 22px;
+  margin: 8px 0;
+}
+.selected-list li {
+  padding: 3px 0;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+.selected-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.selected-item > span {
+  min-width: 0;
+  word-break: break-word;
+}
+.selected-remove {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.selected-remove:hover {
+  background: #fdecea;
+  color: var(--danger);
+}
+
 .muted { color: var(--muted); font-size: 0.85em; }
 .accent { color: var(--ocean-mid); }
 .row-between { display: flex; justify-content: space-between; align-items: center; }

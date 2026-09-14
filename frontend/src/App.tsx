@@ -109,6 +109,10 @@ export default function App() {
     setSelectedStations([id]);
   };
 
+  const removeStation = (id: string) => {
+    setSelectedStations((prev) => prev.filter((st) => st !== id));
+  };
+
   const selectedLabels = selectedStations.map((id) => {
     const st = (data?.stations || []).find((s: any) => s.id === id);
     return st?.short_label || st?.label || id;
@@ -193,8 +197,26 @@ export default function App() {
           <p className="muted" style={{ margin: '6px 0' }}>
             Click a station. Shift-click to add. The calendar date is the plot date until you change it in Studio.
           </p>
-          <ol style={{ paddingLeft: 20, margin: '8px 0' }}>
-            {selectedLabels.map((label, i) => <li key={selectedStations[i]}>{label}</li>)}
+          <ol className="selected-list">
+            {selectedLabels.map((label, i) => {
+              const id = selectedStations[i];
+              return (
+                <li key={id}>
+                  <span className="selected-item">
+                    <span>{label}</span>
+                    <button
+                      type="button"
+                      className="selected-remove"
+                      aria-label={`Remove ${label}`}
+                      title="Remove from selection"
+                      onClick={() => removeStation(id)}
+                    >
+                      ×
+                    </button>
+                  </span>
+                </li>
+              );
+            })}
           </ol>
           <button type="button" className="btn btn-danger" onClick={() => setSelectedStations([])}>
             Clear selection

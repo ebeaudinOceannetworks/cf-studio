@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import Plot from 'react-plotly.js';
 import { STATION_COLOR, UNASSIGNED_COLOR, variableColor, variableXLabel } from './colors';
 
@@ -27,12 +27,12 @@ const SEASON_COLORS: Record<string, { name: string; color: string }> = {
 };
 
 const PRESETS: Record<string, { w: string; h: string; canvas: string }> = {
-  overview: { w: '6', h: '8', canvas: 'portrait' },
-  profile: { w: '6', h: '8', canvas: 'portrait' },
-  seasonal: { w: '6', h: '8', canvas: 'portrait' },
-  transect: { w: '12', h: '5', canvas: 'landscape' },
-  ts: { w: '7', h: '7', canvas: 'square' },
-  sampling: { w: '10', h: '4', canvas: 'wide' },
+  overview: { w: '4', h: '6', canvas: 'portrait' },
+  profile: { w: '4', h: '6', canvas: 'portrait' },
+  seasonal: { w: '4', h: '6', canvas: 'portrait' },
+  transect: { w: '12', h: '4', canvas: 'landscape' },
+  ts: { w: '6', h: '6', canvas: 'square' },
+  sampling: { w: '12', h: '4', canvas: 'wide' },
   distribution: { w: '10', h: '8', canvas: 'square' },
 };
 
@@ -582,11 +582,57 @@ export default function PlotWidget({
       };
     }
     if (plotData?.plot_type === 'ts') {
+      const xs: number[] = plotData.salinity || [];
+      const ys: number[] = plotData.temperature || [];
+      let xmin = Infinity;
+      let xmax = -Infinity;
+      let ymin = Infinity;
+      let ymax = -Infinity;
+      for (let i = 0; i < xs.length; i++) {
+        const x = xs[i];
+        const y = ys[i];
+        if (x != null && Number.isFinite(x)) {
+          xmin = Math.min(xmin, x);
+          xmax = Math.max(xmax, x);
+        }
+        if (y != null && Number.isFinite(y)) {
+          ymin = Math.min(ymin, y);
+          ymax = Math.max(ymax, y);
+        }
+      }
+      const xspan = Math.max(xmax - xmin, 1e-6);
+      const yspan = Math.max(ymax - ymin, 1e-6);
+      const padX = xspan * 0.06;
+      const padY = yspan * 0.06;
+      const x0 = xmin - padX;
+      const x1 = xmax + padX;
+      const y0 = ymin - padY;
+      const y1 = ymax + padY;
       return {
         ...base,
-        xaxis: { ...axis, title: axisTitle(xlabel || 'Practical Salinity (psu)') },
-        yaxis: { ...axis, title: axisTitle(ylabel || 'Temperature (°C)'), autorange: true },
+        margin: { ...base.margin, r: plotData.color_mode === 'season' ? 24 : 88, t: 40, b: 48, l: 56 },
+        xaxis: {
+          ...axis,
+          title: axisTitle(xlabel || 'Practical Salinity (psu)'),
+          range: Number.isFinite(x0) ? [x0, x1] : undefined,
+        },
+        yaxis: {
+          ...axis,
+          title: axisTitle(ylabel || 'Temperature (°C)'),
+          autorange: false,
+          range: Number.isFinite(y0) ? [y0, y1] : undefined,
+          scaleanchor: 'x',
+          scaleratio: (x1 - x0) / (y1 - y0),
+          constrain: 'domain',
+        },
         showlegend: plotData.color_mode === 'season',
+        legend: {
+          ...legendFont,
+          x: 0.98,
+          y: 0.98,
+          xanchor: 'right',
+          yanchor: 'top',
+        },
       };
     }
     if (plotData?.plot_type === 'sampling') {
@@ -733,7 +779,15 @@ export default function PlotWidget({
           <p className="plot-error">{errorMsg}</p>
         ) : plotData ? (
           <>
-            <div className="plot-frame" ref={plotFrameRef}>
+            <div className="plot-area">
+            <div
+              className="plot-frame"
+              ref={plotFrameRef}
+              style={{
+                ['--plot-w']: String(Number(figWidth) || preset.w),
+                ['--plot-h']: String(Number(figHeight) || preset.h),
+              } as CSSProperties}
+            >
               <Plot
                 key={`plot-${plotRev}-${plotData.plot_type}-${overlayColor}-${overlayLabels}-${numDensity}-${numContours}`}
                 data={generatePlotlyTraces()}
@@ -743,6 +797,7 @@ export default function PlotWidget({
                 useResizeHandler
               />
               {loading && <div className="plot-updating">Updating…</div>}
+            </div>
             </div>
             {showAttribution && plotData.attribution && (
               <div className="attribution-foot">{plotData.attribution}</div>
@@ -810,7 +865,7 @@ export default function PlotWidget({
           </label>
           <label>Attribution size<input className="input" value={attrFontSize} onChange={(e) => setAttrFontSize(e.target.value)} /></label>
           <div className="studio-actions">
-            <span className="muted">Save uses {preset.w}×{preset.h} in at {dpi} DPI. Change size and format here, then use Save figure.</span>
+            <span className="muted">Save uses {figWidth}×{figHeight} in at {dpi} DPI. Change size and format here, then use Save figure.</span>
           </div>
         </div>
       )}

@@ -145,7 +145,7 @@ def overview_casts_plot(
     vmin=None,
     vmax=None,
     line_width=2.5,
-    figsize=(10, 5),
+    figsize=(4, 6),
 ):
     fig, ax = _new_axes(figsize, ax)
     matching = match_casts(ds, selected_ids, date_filter)
@@ -206,7 +206,7 @@ def depth_profile_plot(
     vmin=None,
     vmax=None,
     line_width=2.5,
-    figsize=(10, 5),
+    figsize=(4, 6),
 ):
     fig, ax = _new_axes(figsize, ax)
     matching_casts = match_casts(ds, selected_ids, date_filter)
@@ -278,7 +278,7 @@ def transect_plot(
     vmin=None,
     vmax=None,
     colormap=None,
-    figsize=(12, 5),
+    figsize=(12, 4),
 ):
     fig, ax = _new_axes(figsize, ax)
     date_filter = resolve_transect_date(ds, selected_ids, var, date_filter)
@@ -421,7 +421,7 @@ def ts_diagram_plot(
     colormap=None,
     vmin=None,
     vmax=None,
-    figsize=(7, 7),
+    figsize=(6, 6),
 ):
     import xarray as xr
 
@@ -495,7 +495,7 @@ def seasonal_profiles_plot(
     depth_max=None,
     date_filter="All",
     line_width=2.0,
-    figsize=(6, 8),
+    figsize=(4, 6),
 ):
     fig, ax = _new_axes(figsize, ax)
     season_dict = {
@@ -535,7 +535,7 @@ def seasonal_profiles_plot(
     return fig
 
 
-def sampling_days_plot(ds, selected_ids=None, date_filter="All", figsize=(10, 4)):
+def sampling_days_plot(ds, selected_ids=None, date_filter="All", figsize=(12, 4)):
     fig, ax = plt.subplots(figsize=figsize)
     ids = selected_ids or []
     if ids:

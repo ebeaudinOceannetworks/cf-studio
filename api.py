@@ -102,6 +102,8 @@ class PlotStyle(BaseModel):
     color_by: Optional[str] = "Season"
     num_contour_lines: int = 50
     num_density_lines: int = 5
+    overlay_color: str = "black"
+    overlay_labels: bool = True
     num_std: float = 1
     marker_size: float = 8
     line_width: float = 2.5
@@ -166,8 +168,11 @@ def style_dict(req: PlotStyle, attribution_text: str):
         "vmax": req.vmax,
         "colormap": req.colormap,
         "color_by": req.color_by,
+        "secondary_variable": req.secondary_variable,
         "num_contour_lines": req.num_contour_lines,
         "num_density_lines": req.num_density_lines,
+        "overlay_color": req.overlay_color,
+        "overlay_labels": req.overlay_labels,
         "num_std": req.num_std,
         "marker_size": req.marker_size,
         "line_width": req.line_width,

@@ -132,6 +132,14 @@ html, body, #root {
   z-index: 2;
 }
 .mode-bar .heat-toggle { width: 220px; }
+.widget-controls .heat-toggle {
+  width: auto;
+  flex: 0 0 auto;
+}
+.widget-controls .heat-toggle button {
+  padding: 4px 9px;
+  font-size: 0.72rem;
+}
 .main.mode-explore .map-pane,
 .main.mode-studio .widget-pane {
   flex: 1;

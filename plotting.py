@@ -245,6 +245,9 @@ def transect_plot(
     date_filter="All",
     num_contour_lines=20,
     num_density_lines=5,
+    secondary_variable=None,
+    overlay_color="black",
+    overlay_labels=True,
     depth_min=0,
     depth_max=None,
     vmin=None,
@@ -329,21 +332,26 @@ def transect_plot(
         except Exception:
             pass
 
+    overlay_var = secondary_variable if secondary_variable and secondary_variable != "None" else None
     if (
-        num_density_lines
+        overlay_var
+        and overlay_var in data_transect
+        and num_density_lines
         and num_density_lines > 0
-        and "Density" in data_transect
-        and not np.all(np.isnan(data_transect["Density"].values))
+        and not np.all(np.isnan(data_transect[overlay_var].values))
     ):
         try:
-            ax.contour(
+            line_color = "w" if str(overlay_color).lower() == "white" else "k"
+            cs = ax.contour(
                 cast_dist,
                 data_transect.depth.values,
-                data_transect["Density"].values,
-                colors="w",
+                data_transect[overlay_var].values,
+                colors=line_color,
                 linewidths=1,
                 levels=int(num_density_lines),
             )
+            if overlay_labels:
+                ax.clabel(cs, inline=True, fontsize=8, fmt="%g", colors=line_color)
         except Exception:
             pass
 
@@ -603,6 +611,9 @@ def render_plot(ds, plot_type, selected_ids, variable, style):
             date_filter=date_filter,
             num_contour_lines=style.get("num_contour_lines", 50),
             num_density_lines=style.get("num_density_lines", 5),
+            secondary_variable=style.get("secondary_variable"),
+            overlay_color=style.get("overlay_color", "black"),
+            overlay_labels=style.get("overlay_labels", True),
             depth_min=depth_min if depth_min is not None else 0,
             depth_max=depth_max,
             vmin=vmin,

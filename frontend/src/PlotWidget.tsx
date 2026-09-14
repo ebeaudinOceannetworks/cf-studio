@@ -105,6 +105,8 @@ export default function PlotWidget({
   const [colormap, setColormap] = useState('auto');
   const [numContours, setNumContours] = useState('50');
   const [numDensity, setNumDensity] = useState('5');
+  const [overlayColor, setOverlayColor] = useState<'black' | 'white'>('black');
+  const [overlayLabels, setOverlayLabels] = useState(true);
   const [numStd, setNumStd] = useState('1');
   const [markerSize, setMarkerSize] = useState('8');
   const [lineWidth, setLineWidth] = useState('2.5');
@@ -161,6 +163,8 @@ export default function PlotWidget({
     colormap,
     num_contour_lines: Number(numContours) || 20,
     num_density_lines: Number(numDensity) || 5,
+    overlay_color: overlayColor,
+    overlay_labels: overlayLabels,
     num_std: Number(numStd) || 1,
     marker_size: Number(markerSize) || 8,
     line_width: Number(lineWidth) || 2.5,
@@ -260,14 +264,24 @@ export default function PlotWidget({
         },
       }];
       if (plotData.z_secondary && secondaryVar !== 'None') {
+        const overlayStroke = overlayColor === 'white' ? '#ffffff' : '#000000';
         traces.push({
           z: plotData.z_secondary,
           x: plotData.x_dist,
           y: plotData.y_depth,
           type: 'contour',
+          name: plotData.secondary_var || secondaryVar,
           showscale: false,
-          contours: { coloring: 'lines', showlabels: true, labelfont: { color: 'white', size: 10 } },
-          line: { color: 'white', width: 1.5, dash: 'dot' },
+          hoverinfo: 'skip',
+          autocontour: true,
+          ncontours: Number(numDensity) || 5,
+          colorscale: [[0, overlayStroke], [1, overlayStroke]],
+          contours: {
+            coloring: 'lines',
+            showlabels: overlayLabels,
+            labelfont: { color: overlayStroke, size: 11 },
+          },
+          line: { color: overlayStroke, width: 1.6 },
         });
       }
       const xs: number[] = plotData.x_dist || [];
@@ -558,6 +572,22 @@ export default function PlotWidget({
               {availableVars.map((v) => <option key={v} value={v}>Overlay: {v}</option>)}
             </select>
           )}
+          {show.overlay && secondaryVar !== 'None' && (
+            <div className="heat-toggle overlay-color">
+              <button type="button" className={overlayColor === 'black' ? 'on' : ''} onClick={() => setOverlayColor('black')}>
+                Black
+              </button>
+              <button type="button" className={overlayColor === 'white' ? 'on' : ''} onClick={() => setOverlayColor('white')}>
+                White
+              </button>
+            </div>
+          )}
+          {show.overlay && secondaryVar !== 'None' && (
+            <label className="check">
+              <input type="checkbox" checked={overlayLabels} onChange={(e) => setOverlayLabels(e.target.checked)} />
+              Labels
+            </label>
+          )}
           {show.date && (
             <select className="select" value={effectiveDate} onChange={(e) => setSelectedDate(e.target.value)}>
               <option value="All">All dates</option>
@@ -588,7 +618,7 @@ export default function PlotWidget({
           <>
             <div className="plot-frame" ref={plotFrameRef}>
               <Plot
-                key={`plot-${plotRev}-${plotData.plot_type}`}
+                key={`plot-${plotRev}-${plotData.plot_type}-${overlayColor}-${overlayLabels}-${numDensity}`}
                 data={generatePlotlyTraces()}
                 layout={generateLayout()}
                 config={{ responsive: true, displayModeBar: true }}
@@ -628,7 +658,9 @@ export default function PlotWidget({
             </label>
           )}
           {show.contours && <label>Contour lines<input className="input" value={numContours} onChange={(e) => setNumContours(e.target.value)} /></label>}
-          {show.contours && <label>Density lines<input className="input" value={numDensity} onChange={(e) => setNumDensity(e.target.value)} /></label>}
+          {show.contours && secondaryVar !== 'None' && (
+            <label>Overlay contours<input className="input" value={numDensity} onChange={(e) => setNumDensity(e.target.value)} /></label>
+          )}
           {show.std && <label>Std-dev band<input className="input" value={numStd} onChange={(e) => setNumStd(e.target.value)} /></label>}
           {show.marker && <label>Marker size<input className="input" value={markerSize} onChange={(e) => setMarkerSize(e.target.value)} /></label>}
           {show.line && <label>Line width<input className="input" value={lineWidth} onChange={(e) => setLineWidth(e.target.value)} /></label>}

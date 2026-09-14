@@ -269,14 +269,18 @@ export default function PlotWidget({
         zmin: plotData.vmin ?? undefined,
         zmax: plotData.vmax ?? undefined,
         colorbar: {
-          title: { text: colorbarLabel || `${plotData.primary_var} (${plotData.units_primary})`, font: { color: '#143028', size: fs } },
+          title: {
+            text: colorbarLabel || `${plotData.primary_var} (${plotData.units_primary})`,
+            font: { color: '#143028', size: fs },
+            side: 'right',
+          },
           tickfont: { color: '#143028', size: fs },
           titlefont: { color: '#143028', size: fs },
           len: 0.8,
           thickness: 16,
           outlinewidth: 0,
           x: 1.02,
-          xpad: 8,
+          xpad: 12,
         },
       }];
       if (plotData.z_secondary && secondaryVar !== 'None') {
@@ -322,6 +326,7 @@ export default function PlotWidget({
     }
 
     if (plotData.plot_type === 'overview') {
+      const color = plotData.color || variableColor(plotData.variable || activeVar);
       return (plotData.traces || []).map((t: any) => ({
         x: t.x,
         y: t.y,
@@ -329,9 +334,7 @@ export default function PlotWidget({
         name: t.latest ? `Most recent (${t.date})` : t.date,
         showlegend: !!t.latest,
         hoverinfo: 'name',
-        line: t.latest
-          ? { color: '#1b4332', width: lineW }
-          : { color: '#9bb0a8', width: 1 },
+        line: { color, width: t.latest ? lineW : 1 },
         opacity: t.latest ? 1 : 0.35,
       }));
     }
@@ -395,12 +398,16 @@ export default function PlotWidget({
           size: mSize,
           opacity: 0.75,
           colorbar: {
-            title: { text: colorbarLabel || plotData.colorbar_title || '', font: { color: '#143028', size: fs } },
+            title: {
+              text: colorbarLabel || plotData.colorbar_title || '',
+              font: { color: '#143028', size: fs },
+              side: 'right',
+            },
             tickfont: { color: '#143028', size: fs },
             thickness: 16,
             outlinewidth: 0,
             x: 1.02,
-            xpad: 8,
+            xpad: 12,
           },
         },
         name: 'T–S',
@@ -477,7 +484,7 @@ export default function PlotWidget({
     const axisTitle = (text: string) => ({ text, font: { size: fs, color: '#143028' } });
     const base: any = {
       autosize: true,
-      margin: { t: 40, b: showAttribution ? 56 : 40, l: 56, r: show.colorbar ? 88 : 30 },
+      margin: { t: 40, b: showAttribution ? 56 : 40, l: 56, r: show.colorbar ? 96 : 30 },
       paper_bgcolor: '#ffffff',
       plot_bgcolor: '#ffffff',
       font: { color: '#143028', size: fs },
@@ -681,19 +688,6 @@ export default function PlotWidget({
             <input type="checkbox" checked={showAttribution} onChange={(e) => setShowAttribution(e.target.checked)} />
             Attribution
           </label>
-          <label className="check font-size-ctrl">
-            Font
-            <input
-              className="input"
-              type="number"
-              min="8"
-              max="28"
-              step="1"
-              value={fontSize}
-              onChange={(e) => setFontSize(e.target.value)}
-              aria-label="Font size"
-            />
-          </label>
         </div>
         <div className="widget-controls">
           <button type="button" className="btn btn-ghost" onClick={() => setStudioOpen((v) => !v)}>
@@ -751,7 +745,7 @@ export default function PlotWidget({
           <label>X label<input className="input" value={xlabel} onChange={(e) => setXlabel(e.target.value)} /></label>
           <label>Y label<input className="input" value={ylabel} onChange={(e) => setYlabel(e.target.value)} /></label>
           <label>Font size<input className="input" type="number" min="8" max="28" step="1" value={fontSize} onChange={(e) => setFontSize(e.target.value)} /></label>
-          {show.colorbar && <label>Colorbar<input className="input" value={colorbarLabel} onChange={(e) => setColorbarLabel(e.target.value)} /></label>}
+          {show.colorbar && <label>Colorbar label<input className="input" value={colorbarLabel} onChange={(e) => setColorbarLabel(e.target.value)} /></label>}
           {show.depth && <label>Depth min<input className="input" value={depthMin} onChange={(e) => setDepthMin(e.target.value)} /></label>}
           {show.depth && <label>Depth max<input className="input" value={depthMax} onChange={(e) => setDepthMax(e.target.value)} /></label>}
           {show.vlim && <label>Value min<input className="input" value={vmin} onChange={(e) => setVmin(e.target.value)} /></label>}

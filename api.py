@@ -407,6 +407,7 @@ def plot_overview_payload(req: PlotStyle, attribution_text: str):
         "depth_max": hi,
         "variable": req.variable,
         "units": data.get_units(req.variable),
+        "color": variable_color(req.variable),
         "attribution": attribution_text,
     }
 

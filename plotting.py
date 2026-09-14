@@ -167,18 +167,19 @@ def overview_casts_plot(
         if np.sum(mask) < 2:
             continue
         is_latest = c == latest_c
+        color = variable_color(var)
         if is_latest:
             latest_label = str(pd.to_datetime(latest_t).date()) if latest_t is not None else str(c)
             ax.plot(
                 vals[mask],
                 depths[mask],
-                color="#1b4332",
+                color=color,
                 linewidth=line_width,
                 zorder=3,
                 label=f"Most recent ({latest_label})",
             )
         else:
-            ax.plot(vals[mask], depths[mask], color="#9bb0a8", linewidth=0.9, alpha=0.35, zorder=1)
+            ax.plot(vals[mask], depths[mask], color=color, linewidth=0.9, alpha=0.35, zorder=1)
 
     ax.invert_yaxis()
     ax.set_ylabel("Depth (m)")

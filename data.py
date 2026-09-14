@@ -156,6 +156,32 @@ def as_str(val):
     return str(as_scalar(val))
 
 
+def is_station_cast(cast_ds) -> bool:
+    st_name = as_str(cast_ds.station_name.values) if "station_name" in cast_ds else ""
+    c_type = as_str(cast_ds.cast_type.values) if "cast_type" in cast_ds else ""
+    return c_type == "station" and st_name not in ("nan", "Unassigned Cast Data", "")
+
+
+def sampling_day_counts(ds_sub):
+    sampling_days = np.unique(ds_sub.time.dt.floor("1D"))
+    dates = []
+    station_counts = []
+    unassigned_counts = []
+    for day in sampling_days:
+        day_ds = ds_sub.where(ds_sub.time.dt.floor("1D") == day, drop=True)
+        n_st = 0
+        n_un = 0
+        for c in np.ravel(day_ds.cast.values):
+            if is_station_cast(day_ds.sel(cast=c)):
+                n_st += 1
+            else:
+                n_un += 1
+        dates.append(str(pd.to_datetime(day).date()))
+        station_counts.append(int(n_st))
+        unassigned_counts.append(int(n_un))
+    return dates, station_counts, unassigned_counts
+
+
 def as_float(val):
     raw = as_scalar(val)
     return float(raw)

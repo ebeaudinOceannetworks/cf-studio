@@ -15,6 +15,7 @@ from pydantic import BaseModel
 import data
 import plotting
 from attributions import data_attributions
+from colors import STATION_COLOR, UNASSIGNED_COLOR
 
 app = FastAPI(title="Community Fishers Plot Studio")
 
@@ -216,6 +217,7 @@ def get_summary():
             "variables": [],
             "plot_types": PLOT_TYPES,
             "nations": [],
+            "palette": {"station": STATION_COLOR, "unassigned": UNASSIGNED_COLOR},
             "default_folder": current_folder,
         }
 
@@ -250,14 +252,14 @@ def get_summary():
 
         if c_type == "station" and st_name not in ("nan", "Unassigned Cast Data"):
             marker_key = st_name
-            color = "#2d6a4f"
+            color = STATION_COLOR
             kind = "station"
             short_label = st_name
             cast_number = None
             label = st_name
         else:
             marker_key = str(c)
-            color = "#e07a2f"
+            color = UNASSIGNED_COLOR
             kind = "unassigned"
             unassigned_n += 1
             cast_number = unassigned_n
@@ -312,6 +314,7 @@ def get_summary():
         "variables": sorted(detected_vars),
         "plot_types": PLOT_TYPES,
         "nations": sorted(list(all_nations)),
+        "palette": {"station": STATION_COLOR, "unassigned": UNASSIGNED_COLOR},
         "default_folder": current_folder,
     }
 
@@ -555,13 +558,14 @@ def plot_sampling_payload(req: PlotStyle, attribution_text: str):
     if not matching:
         return {"error": "No casts available for sampling timeline."}
     ds_sub = ds_all.sel(cast=matching)
-    sampling_days = np.unique(ds_sub.time.dt.floor("1D"))
-    counts = [int(ds_sub.where(ds_sub.time.dt.floor("1D") == day, drop=True).cast.size) for day in sampling_days]
-    dates = [str(pd.to_datetime(d).date()) for d in sampling_days]
+    dates, station_counts, unassigned_counts = data.sampling_day_counts(ds_sub)
     return {
         "plot_type": "sampling",
         "dates": dates,
-        "counts": counts,
+        "station_counts": station_counts,
+        "unassigned_counts": unassigned_counts,
+        "station_color": STATION_COLOR,
+        "unassigned_color": UNASSIGNED_COLOR,
         "attribution": attribution_text,
     }
 

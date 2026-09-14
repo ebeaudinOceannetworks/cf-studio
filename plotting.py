@@ -5,6 +5,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+from colors import STATION_COLOR, UNASSIGNED_COLOR
 from data import (
     as_scalar,
     as_str,
@@ -16,6 +17,7 @@ from data import (
     resolve_cmap,
     resolve_transect_date,
     transect_distances,
+    sampling_day_counts,
 )
 
 
@@ -207,7 +209,8 @@ def depth_profile_plot(
         vals = np.ravel(c_ds[var].values)
         mask = ~np.isnan(vals) & ~np.isnan(depths)
         if np.sum(mask) > 1:
-            ax.plot(vals[mask], depths[mask], alpha=0.3, linewidth=1, color="gray")
+            ax.plot(vals[mask], depths[mask], alpha=0.3, linewidth=1, color="gray",
+                    label="All profiles" if not profile_matrix else None)
             interp_vals = np.interp(common_depths, depths[mask], vals[mask], left=np.nan, right=np.nan)
             profile_matrix.append(interp_vals)
 
@@ -216,14 +219,16 @@ def depth_profile_plot(
         mean_profile = np.nanmean(profile_arr, axis=0)
         std_profile = np.nanstd(profile_arr, axis=0)
         if num_std and num_std > 0:
+            std_label = f"±{num_std:g} std"
             ax.fill_betweenx(
                 common_depths,
                 mean_profile - (num_std * std_profile),
                 mean_profile + (num_std * std_profile),
                 color="#1d7a8c",
                 alpha=0.25,
+                label=std_label,
             )
-        ax.plot(mean_profile, common_depths, color="#1b4332", linewidth=line_width, label="Mean Profile")
+        ax.plot(mean_profile, common_depths, color="#1b4332", linewidth=line_width, label="Mean profile")
 
     ax.invert_yaxis()
     ax.set_ylabel("Depth (m)")
@@ -233,6 +238,8 @@ def depth_profile_plot(
         ax.set_xlim(vmin, vmax)
     ax.set_ylim(max_d, lo)
     ax.grid(True, linestyle="--", alpha=0.5)
+    if ax.get_legend_handles_labels()[0]:
+        ax.legend(loc="lower right", frameon=False)
     return fig
 
 
@@ -510,7 +517,7 @@ def seasonal_profiles_plot(
         mean = valid.mean(dim="cast")
         std = valid.std(dim="cast", ddof=0)
         ax.plot(mean, valid.depth, color=info["color"], linewidth=line_width, label=f"{info['name']} ({season})")
-        ax.fill_betweenx(valid.depth, mean - std, mean + std, facecolor=info["color"], alpha=0.15)
+        ax.fill_betweenx(valid.depth, mean - std, mean + std, facecolor=info["color"], alpha=0.15, label="_nolegend_")
 
     lo, max_d = valid_depth_extent(ds, selected_casts, var, depth_min, depth_max)
     ax.invert_yaxis()
@@ -536,11 +543,13 @@ def sampling_days_plot(ds, selected_ids=None, date_filter="All", figsize=(10, 4)
         ax.text(0.5, 0.5, "No casts available for sampling timeline.", ha="center", va="center")
         return fig
 
-    sampling_days = np.unique(ds_sub.time.dt.floor("1D"))
-    counts = [ds_sub.where(ds_sub.time.dt.floor("1D") == day, drop=True).cast.size for day in sampling_days]
-    ax.bar(pd.to_datetime(sampling_days), counts, color="#0077b6", edgecolor="#143028", width=2)
+    dates, station_counts, unassigned_counts = sampling_day_counts(ds_sub)
+    x = pd.to_datetime(dates)
+    ax.bar(x, station_counts, color=STATION_COLOR, edgecolor="#143028", width=2, label="Stations")
+    ax.bar(x, unassigned_counts, bottom=station_counts, color=UNASSIGNED_COLOR, edgecolor="#143028", width=2, label="Unassigned")
     ax.set_ylabel("# of Casts")
-    ax.set_title(f"Sampling Frequency across {len(sampling_days)} Days")
+    ax.set_title(f"Sampling Frequency across {len(dates)} Days")
+    ax.legend(frameon=False)
     ax.grid(alpha=0.3)
     return fig
 

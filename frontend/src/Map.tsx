@@ -1,9 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { MapContainer, TileLayer, CircleMarker, Tooltip, Polyline, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
+import { STATION_COLOR, UNASSIGNED_COLOR, isUnassignedStation } from './colors';
 
-const STATION_COLOR = '#2d6a4f';
-const UNASSIGNED_COLOR = '#e07a2f';
 const SELECTED_COLOR = '#00b4d8';
 
 const MONTH_STARTS = [1, 32, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335];
@@ -18,11 +17,8 @@ function dayOfYear(iso: string): number {
   return Math.floor((Date.UTC(y, m - 1, d) - Date.UTC(y, 0, 1)) / 86400000) + 1;
 }
 
-function isUnassignedStation(st: any) {
-  return st.kind === 'unassigned' || (!st.kind && (st.color === '#0077b6' || st.color === '#72aebb' || st.color === UNASSIGNED_COLOR));
-}
-
 function markerFill(st: any) {
+  if (st.color) return st.color;
   return isUnassignedStation(st) ? UNASSIGNED_COLOR : STATION_COLOR;
 }
 

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import MapView from './Map';
 import PlotWidget from './PlotWidget';
 import DateHeatmap from './DateHeatmap';
+import { isUnassignedStation } from './colors';
 
 export default function App() {
   const [data, setData] = useState<any>(null);
@@ -31,7 +32,7 @@ export default function App() {
   const filteredStations = useMemo(() => {
     return communityStations.filter((st: any) => {
       const matchesDate = dateFilter === 'All' || (st.dates || []).some((d: string) => d.startsWith(dateFilter));
-      const isUnassigned = st.kind === 'unassigned' || (!st.kind && (st.color === '#0077b6' || st.color === '#72aebb' || st.color === '#e07a2f'));
+      const isUnassigned = isUnassignedStation(st);
       const matchesKind = isUnassigned ? showUnassigned : showStations;
       return matchesDate && matchesKind;
     });

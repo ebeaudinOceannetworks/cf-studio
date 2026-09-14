@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Plot from 'react-plotly.js';
+import { STATION_COLOR, UNASSIGNED_COLOR } from './colors';
 
 interface WidgetProps {
   id: string;
@@ -39,6 +40,17 @@ function stationTopLabel(name: string) {
   const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
   if (parts.length >= 2) return `${parts[0]}<br>${parts[1]}`;
   return parts[0] || '';
+}
+
+function withAlpha(color: string, a: number) {
+  const rgb = color.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+  if (rgb) return `rgba(${rgb[1]}, ${rgb[2]}, ${rgb[3]}, ${a})`;
+  const hex = color.match(/^#([0-9a-f]{6})$/i);
+  if (hex) {
+    const n = parseInt(hex[1], 16);
+    return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+  }
+  return color;
 }
 
 function plotKind(plotType: string) {
@@ -114,6 +126,7 @@ export default function PlotWidget({
   const [figHeight, setFigHeight] = useState('8');
   const [dpi, setDpi] = useState('300');
   const [exportFormat, setExportFormat] = useState('png');
+  const [fileName, setFileName] = useState('');
   const [attrPosition, setAttrPosition] = useState('footer');
   const [attrFontSize, setAttrFontSize] = useState('8');
 
@@ -321,8 +334,14 @@ export default function PlotWidget({
     }
 
     if (plotData.plot_type === 'profile') {
-      const traces: any[] = (plotData.traces || []).map((t: any) => ({
-        x: t.x, y: t.y, mode: 'lines', line: { color: '#8aa8a0', width: 1 }, opacity: 0.35, name: t.cast, showlegend: false,
+      const traces: any[] = (plotData.traces || []).map((t: any, i: number) => ({
+        x: t.x, y: t.y, mode: 'lines',
+        line: { color: '#8aa8a0', width: 1 },
+        opacity: 0.35,
+        name: 'All profiles',
+        legendgroup: 'profiles',
+        showlegend: i === 0,
+        hoverinfo: 'skip',
       }));
       const nStd = Number(plotData.num_std) || 1;
       if (plotData.mean_vals?.length && plotData.std_vals?.length && nStd > 0) {
@@ -330,17 +349,18 @@ export default function PlotWidget({
         const lower = plotData.mean_vals.map((m: number, i: number) => (m == null || plotData.std_vals[i] == null) ? null : m - nStd * plotData.std_vals[i]);
         traces.push({
           x: upper, y: plotData.common_depths, mode: 'lines', line: { width: 0 },
-          showlegend: false, hoverinfo: 'skip', name: 'std+',
+          showlegend: false, hoverinfo: 'skip', legendgroup: 'std', name: 'std+',
         });
         traces.push({
           x: lower, y: plotData.common_depths, mode: 'lines', line: { width: 0 },
-          fill: 'tonexty', fillcolor: 'rgba(0, 119, 182, 0.22)',
-          showlegend: false, hoverinfo: 'skip', name: 'std-',
+          fill: 'tonexty', fillcolor: 'rgba(29, 122, 140, 0.25)',
+          showlegend: true, hoverinfo: 'skip', legendgroup: 'std',
+          name: `±${nStd} std`,
         });
       }
       traces.push({
         x: plotData.mean_vals, y: plotData.common_depths,
-        mode: 'lines', line: { color: '#2d6a4f', width: lineW }, name: 'Mean profile',
+        mode: 'lines', line: { color: '#1b4332', width: lineW }, name: 'Mean profile',
       });
       return traces;
     }
@@ -387,19 +407,38 @@ export default function PlotWidget({
     if (plotData.plot_type === 'seasonal') {
       const traces: any[] = [];
       for (const s of plotData.series || []) {
+        if (s.std?.length) {
+          const upper = s.mean.map((m: number, i: number) => (m == null || s.std[i] == null) ? null : m + s.std[i]);
+          const lower = s.mean.map((m: number, i: number) => (m == null || s.std[i] == null) ? null : m - s.std[i]);
+          traces.push({
+            x: upper, y: s.depth, mode: 'lines', line: { width: 0 },
+            showlegend: false, hoverinfo: 'skip', legendgroup: s.name, name: `${s.name} std+`,
+          });
+          traces.push({
+            x: lower, y: s.depth, mode: 'lines', line: { width: 0 },
+            fill: 'tonexty', fillcolor: withAlpha(s.color, 0.15),
+            showlegend: false, hoverinfo: 'skip', legendgroup: s.name, name: `${s.name} std`,
+          });
+        }
         traces.push({
           x: s.mean, y: s.depth, mode: 'lines',
-          line: { color: s.color, width: lineW }, name: s.name,
+          line: { color: s.color, width: lineW }, name: s.name, legendgroup: s.name,
         });
       }
       return traces;
     }
 
     if (plotData.plot_type === 'sampling') {
-      return [{
-        x: plotData.dates, y: plotData.counts, type: 'bar',
-        marker: { color: '#0077b6' }, name: 'Casts',
-      }];
+      return [
+        {
+          x: plotData.dates, y: plotData.station_counts || [], type: 'bar',
+          marker: { color: plotData.station_color || STATION_COLOR }, name: 'Stations',
+        },
+        {
+          x: plotData.dates, y: plotData.unassigned_counts || [], type: 'bar',
+          marker: { color: plotData.unassigned_color || UNASSIGNED_COLOR }, name: 'Unassigned',
+        },
+      ];
     }
 
     if (plotData.plot_type === 'distribution') {
@@ -407,7 +446,7 @@ export default function PlotWidget({
         x: p.values,
         type: 'histogram',
         name: p.variable,
-        marker: { color: '#2d6a4f' },
+        marker: { color: STATION_COLOR },
         xaxis: i === 0 ? 'x' : `x${i + 1}`,
         yaxis: i === 0 ? 'y' : `y${i + 1}`,
       }));
@@ -489,6 +528,10 @@ export default function PlotWidget({
     if (plotData?.plot_type === 'overview' || plotData?.plot_type === 'profile' || plotData?.plot_type === 'seasonal') {
       return {
         ...base,
+        showlegend: plotData.plot_type !== 'overview',
+        legend: plotData.plot_type === 'profile'
+          ? { x: 0.98, y: 0.02, xanchor: 'right', yanchor: 'bottom', bgcolor: 'rgba(255,255,255,0.85)', borderwidth: 0 }
+          : { bgcolor: 'rgba(255,255,255,0.85)', borderwidth: 0 },
         xaxis: { ...axis, title: { text: xlabel || `${plotData.variable} (${plotData.units})` } },
         yaxis: {
           ...axis,
@@ -509,6 +552,9 @@ export default function PlotWidget({
     if (plotData?.plot_type === 'sampling') {
       return {
         ...base,
+        barmode: 'stack',
+        showlegend: true,
+        legend: { bgcolor: 'rgba(255,255,255,0.85)', borderwidth: 0 },
         xaxis: { ...axis, title: { text: xlabel || 'Date' } },
         yaxis: { ...axis, title: { text: ylabel || '# of casts' }, autorange: true },
       };
@@ -517,6 +563,14 @@ export default function PlotWidget({
       return { ...base, grid: { rows: 3, columns: 3, pattern: 'independent' }, margin: { t: 30, b: 30, l: 40, r: 16 } };
     }
     return base;
+  };
+
+  const downloadName = () => {
+    let base = (fileName.trim() || title.trim() || 'cf-plot');
+    base = base.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-').replace(/\.+$/, '').trim();
+    base = base.replace(/\.(png|svg|pdf)$/i, '');
+    if (!base) base = 'cf-plot';
+    return `${base}.${exportFormat}`;
   };
 
   const saveFigure = async () => {
@@ -537,7 +591,7 @@ export default function PlotWidget({
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `cf-plot.${exportFormat}`;
+      a.download = downloadName();
       a.click();
       URL.revokeObjectURL(url);
     } catch (err: any) {
@@ -605,8 +659,19 @@ export default function PlotWidget({
           <button type="button" className="btn btn-ghost" onClick={() => setStudioOpen((v) => !v)}>
             {studioOpen ? 'Hide options' : 'Customize'}
           </button>
+          <span className="file-name-wrap">
+            <input
+              className="input"
+              type="text"
+              value={fileName}
+              onChange={(e) => setFileName(e.target.value)}
+              placeholder={title.trim() || 'cf-plot'}
+              aria-label="File name"
+            />
+            <span className="file-ext">.{exportFormat}</span>
+          </span>
           <button type="button" className="btn btn-save" disabled={saving} onClick={saveFigure}>
-            {saving ? 'Saving…' : `Save figure (${exportFormat.toUpperCase()})`}
+            {saving ? 'Saving…' : 'Save figure'}
           </button>
         </div>
       </div>
@@ -673,6 +738,7 @@ export default function PlotWidget({
               <option value="600">600</option>
             </select>
           </label>
+          <label>File name<input className="input" value={fileName} onChange={(e) => setFileName(e.target.value)} placeholder={title.trim() || 'cf-plot'} /></label>
           <label>Format
             <select className="select" value={exportFormat} onChange={(e) => setExportFormat(e.target.value)}>
               <option value="png">PNG</option>

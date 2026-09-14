@@ -242,6 +242,28 @@ html, body, #root {
   background: var(--ocean-mid);
   color: #fff;
 }
+.file-name-wrap {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  overflow: hidden;
+}
+.file-name-wrap .input {
+  border: none;
+  width: 160px;
+  margin: 0;
+  padding: 6px 8px;
+  font-size: 0.85em;
+  box-shadow: none;
+}
+.file-ext {
+  font-size: 0.85em;
+  color: var(--muted);
+  padding-right: 10px;
+  flex: none;
+}
 
 .widget.studio-open {
   flex: 1 1 100%;

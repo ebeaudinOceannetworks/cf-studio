@@ -18,6 +18,7 @@ export default function App() {
   const [drawTransect, setDrawTransect] = useState<boolean>(false);
   const [showStations, setShowStations] = useState<boolean>(true);
   const [showUnassigned, setShowUnassigned] = useState<boolean>(true);
+  const [showTimeline, setShowTimeline] = useState<boolean>(false);
   const [mode, setMode] = useState<'explore' | 'studio'>('explore');
 
   const communityStations = useMemo(() => {
@@ -249,9 +250,11 @@ export default function App() {
             drawTransect={drawTransect}
             showStations={showStations}
             showUnassigned={showUnassigned}
+            showTimeline={showTimeline}
             onDrawTransect={setDrawTransect}
             onShowStations={setShowStations}
             onShowUnassigned={setShowUnassigned}
+            onShowTimeline={setShowTimeline}
             focus={mapFocus}
             active={mode === 'explore'}
             onStationSelect={handleStationClick}

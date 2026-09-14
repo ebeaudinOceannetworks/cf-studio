@@ -19,6 +19,13 @@ from data import (
 )
 
 
+def station_top_label(name: str) -> str:
+    parts = str(name or "").split()
+    if len(parts) >= 2:
+        return f"{parts[0]}\n{parts[1]}"
+    return parts[0] if parts else ""
+
+
 def apply_export_chrome(
     fig,
     title=None,
@@ -75,6 +82,13 @@ def apply_export_chrome(
         fig.subplots_adjust(bottom=0.16)
     else:
         fig.tight_layout()
+    has_top_labels = any(
+        abs(float(t.get_position()[1]) - 1.02) < 1e-6
+        for ax in fig.axes
+        for t in ax.texts
+    )
+    if has_top_labels:
+        fig.subplots_adjust(top=min(fig.subplotpars.top, 0.82))
     return fig
 
 
@@ -334,21 +348,28 @@ def transect_plot(
             pass
 
     for i, d in enumerate(cast_dist):
-        st_type = data_transect.cast_type[i].values
-        marker = "H" if as_str(st_type) == "station" else "v"
-        ax.axvline(d, lw=0.4, c="k", alpha=0.7)
-        ax.scatter(d, 0, marker=marker, s=50, c="k", clip_on=False)
-        st_name = as_str(data_transect.station_name[i].values)
-        if st_name != "nan":
+        st_type = as_str(data_transect.cast_type[i].values)
+        marker = "H" if st_type == "station" else "v"
+        ax.axvline(d, lw=0.4, c="k", zorder=101)
+        ax.scatter(d, 0, marker=marker, s=50, c="k", clip_on=False, zorder=101)
+
+    if "station_name" in data_transect:
+        for i, d in enumerate(cast_dist):
+            if as_str(data_transect.cast_type[i].values) != "station":
+                continue
+            st_name = as_str(data_transect.station_name[i].values)
+            if st_name in ("", "nan"):
+                continue
             ax.text(
                 d,
                 1.02,
-                st_name,
+                station_top_label(st_name),
                 transform=ax.get_xaxis_transform(),
                 ha="center",
                 va="bottom",
-                fontsize=8,
-                rotation=30,
+                fontsize=12,
+                clip_on=False,
+                zorder=101,
             )
 
     lo, max_d = valid_depth_extent(ds, deepest_casts, var, depth_min, depth_max)

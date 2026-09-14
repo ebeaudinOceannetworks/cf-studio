@@ -386,6 +386,7 @@ def cor2xr(cor_file):
                     "station_name": ("cast", [str(current_meta["station_name"])]),
                     "station": ("cast", [str(current_meta["station_name"])]),
                     "cast_type": ("cast", [str(current_meta["cast_type"])]),
+                    "cast_name": ("cast", [str(current_meta["cast_name"])]),
                     "community": ("cast", [str(community)]),
                     "time": ("cast", [start_time]),
                     "lat": ("cast", [lat_val]),

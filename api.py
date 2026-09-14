@@ -235,6 +235,7 @@ def get_summary():
         st_name = data.as_str(cast_ds.station_name.values)
         c_type = data.as_str(cast_ds.cast_type.values)
         community = data.as_str(cast_ds.community.values) if "community" in cast_ds else "Unknown"
+        cast_name = data.as_str(cast_ds.cast_name.values) if "cast_name" in cast_ds else ""
         if community != "Unknown":
             all_nations.add(community)
 
@@ -251,11 +252,16 @@ def get_summary():
             label = st_name
         else:
             marker_key = str(c)
-            color = "#0077b6"
+            color = "#e07a2f"
             kind = "unassigned"
             unassigned_n += 1
             cast_number = unassigned_n
-            short_label = f"Cast {cast_number}"
+            date_bit = f" ({this_date})" if this_date and this_date != "Unknown" else ""
+            if cast_name and cast_name not in ("nan", "Unassigned Cast Data"):
+                name = cast_name
+            else:
+                name = f"CAST-{cast_number}"
+            short_label = f"{name}{date_bit}"
             label = short_label
 
         if marker_key not in unique_markers:
@@ -342,6 +348,7 @@ def plot_transect_payload(req: PlotStyle, attribution_text: str):
         "primary_var": req.variable,
         "secondary_var": req.secondary_variable,
         "stations": [data.as_str(s) for s in data_transect.station_name.values],
+        "cast_types": [data.as_str(t) for t in data_transect.cast_type.values],
         "units_primary": data.get_units(req.variable),
         "units_secondary": data.get_units(req.secondary_variable or ""),
         "colorscale": data.get_plotly_colorscale(req.variable, req.colormap),

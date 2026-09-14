@@ -2,6 +2,9 @@ import { useEffect, useRef } from 'react';
 import { MapContainer, TileLayer, CircleMarker, Tooltip, Polyline, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 
+const STATION_COLOR = '#2d6a4f';
+const UNASSIGNED_COLOR = '#e07a2f';
+
 interface MapProps {
   stations: any[];
   selectedIds: string[];
@@ -49,19 +52,22 @@ function MapResize({ active }: { active: boolean }) {
   return null;
 }
 
+function isUnassignedStation(st: any) {
+  return st.kind === 'unassigned' || (!st.kind && (st.color === '#0077b6' || st.color === '#72aebb' || st.color === UNASSIGNED_COLOR));
+}
+
+function markerFill(st: any) {
+  return isUnassignedStation(st) ? UNASSIGNED_COLOR : STATION_COLOR;
+}
+
 function markerTooltip(st: any, isSelected: boolean, selectedIndex: number, selectedCount: number) {
-  if (st.kind === 'unassigned' || (!st.kind && st.color === '#0077b6')) {
-    return (
-      <div>
-        <b>{st.short_label || st.label}</b>
-        <div>{st.preview_date || (st.dates || [])[0] || ''}</div>
-      </div>
-    );
-  }
+  const nation = st.community && st.community !== 'Unknown' && st.community !== 'nan'
+    ? st.community
+    : null;
   return (
     <div>
       <b>{st.short_label || st.label}</b>
-      <div style={{ fontSize: '0.85em', color: '#2d6a4f' }}>{st.community}</div>
+      {nation && <div style={{ fontSize: '0.85em', color: '#2d6a4f' }}>{nation}</div>}
       {isSelected && selectedCount > 1 && (
         <div style={{ color: '#0077b6', fontWeight: 600 }}>#{selectedIndex + 1}</div>
       )}
@@ -134,10 +140,11 @@ export default function MapView({
               center={[st.lat, st.lon]}
               radius={isSelected ? 10 : 7}
               pathOptions={{
-                color: isSelected ? '#00b4d8' : st.color,
-                fillColor: isSelected ? '#00b4d8' : st.color,
-                fillOpacity: 0.88,
-                weight: isSelected ? 3 : 1,
+                color: isSelected ? '#00b4d8' : markerFill(st),
+                fillColor: isSelected ? '#00b4d8' : markerFill(st),
+                opacity: 1,
+                fillOpacity: 0.4,
+                weight: isSelected ? 3 : 2,
               }}
               eventHandlers={{
                 click: (e) => onStationSelect(st.id, !!(e.originalEvent as MouseEvent)?.shiftKey),

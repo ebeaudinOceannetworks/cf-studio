@@ -30,7 +30,7 @@ export default function App() {
   const filteredStations = useMemo(() => {
     return communityStations.filter((st: any) => {
       const matchesDate = dateFilter === 'All' || (st.dates || []).some((d: string) => d.startsWith(dateFilter));
-      const isUnassigned = st.kind === 'unassigned' || (!st.kind && st.color === '#0077b6');
+      const isUnassigned = st.kind === 'unassigned' || (!st.kind && (st.color === '#0077b6' || st.color === '#72aebb' || st.color === '#e07a2f'));
       const matchesKind = isUnassigned ? showUnassigned : showStations;
       return matchesDate && matchesKind;
     });

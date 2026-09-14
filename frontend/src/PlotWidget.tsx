@@ -35,6 +35,12 @@ const PRESETS: Record<string, { w: string; h: string; canvas: string }> = {
   distribution: { w: '10', h: '8', canvas: 'square' },
 };
 
+function stationTopLabel(name: string) {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return `${parts[0]}<br>${parts[1]}`;
+  return parts[0] || '';
+}
+
 function plotKind(plotType: string) {
   if (plotType.includes('Overview')) return 'overview';
   if (plotType.includes('Transect')) return 'transect';
@@ -264,6 +270,24 @@ export default function PlotWidget({
           line: { color: 'white', width: 1.5, dash: 'dot' },
         });
       }
+      const xs: number[] = plotData.x_dist || [];
+      const types: string[] = plotData.cast_types || [];
+      if (xs.length) {
+        traces.push({
+          x: xs,
+          y: xs.map(() => 0),
+          mode: 'markers',
+          marker: {
+            symbol: xs.map((_, i) => (types[i] === 'station' ? 'hexagon' : 'triangle-down')),
+            size: 10,
+            color: '#000000',
+            line: { width: 0 },
+          },
+          cliponaxis: false,
+          hoverinfo: 'skip',
+          showlegend: false,
+        });
+      }
       return traces;
     }
 
@@ -397,15 +421,55 @@ export default function PlotWidget({
     };
 
     if (plotData?.plot_type === 'transect') {
+      const xs: number[] = plotData.x_dist || [];
+      const types: string[] = plotData.cast_types || [];
+      const names: string[] = plotData.stations || [];
+      const lastX = xs.length ? xs[xs.length - 1] : 1;
+      const hasStationLabels = types.some((t, i) => t === 'station' && stationTopLabel(names[i]));
       return {
         ...base,
-        xaxis: { ...axis, title: { text: xlabel || 'Distance along transect (km)' } },
+        margin: {
+          ...base.margin,
+          t: title ? (hasStationLabels ? 88 : 48) : (hasStationLabels ? 56 : 40),
+        },
+        xaxis: {
+          ...axis,
+          title: { text: xlabel || 'Distance along transect (km)' },
+          range: [0, lastX],
+        },
         yaxis: {
           ...axis,
           title: { text: ylabel || 'Depth (m)' },
           autorange: depthRange ? false : 'reversed',
           range: depthRange,
         },
+        shapes: xs.map((d) => ({
+          type: 'line',
+          x0: d,
+          x1: d,
+          xref: 'x',
+          y0: 0,
+          y1: 1,
+          yref: 'paper',
+          layer: 'above',
+          line: { color: 'rgba(0,0,0,0.85)', width: 1 },
+        })),
+        annotations: xs.flatMap((d, i) => {
+          if (types[i] !== 'station') return [];
+          const text = stationTopLabel(names[i]);
+          if (!text) return [];
+          return [{
+            x: d,
+            y: 1.02,
+            xref: 'x',
+            yref: 'paper',
+            text,
+            showarrow: false,
+            yanchor: 'bottom',
+            xanchor: 'center',
+            font: { size: 11, color: '#143028' },
+          }];
+        }),
       };
     }
     if (plotData?.plot_type === 'overview' || plotData?.plot_type === 'profile' || plotData?.plot_type === 'seasonal') {

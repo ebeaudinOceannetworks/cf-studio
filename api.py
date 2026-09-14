@@ -15,7 +15,7 @@ from pydantic import BaseModel
 import data
 import plotting
 from attributions import data_attributions
-from colors import STATION_COLOR, UNASSIGNED_COLOR
+from colors import STATION_COLOR, UNASSIGNED_COLOR, variable_color
 
 app = FastAPI(title="Community Fishers Plot Studio")
 
@@ -582,7 +582,14 @@ def plot_distribution_payload(req: PlotStyle, attribution_text: str):
             continue
         vals = np.ravel(ds_sub[var].values)
         valid = vals[np.isfinite(vals)]
-        panels.append({"variable": var, "values": valid.tolist() if valid.size else []})
+        units = data.get_units(var)
+        panels.append({
+            "variable": var,
+            "units": units,
+            "xlabel": f"{var} ({units})" if units else var,
+            "values": valid.tolist() if valid.size else [],
+            "color": variable_color(var),
+        })
         if len(panels) >= 9:
             break
     return {"plot_type": "distribution", "panels": panels, "attribution": attribution_text}

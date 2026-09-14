@@ -28,6 +28,7 @@ UNITS = {
     "dissolved oxygen": "µL L⁻¹",
     "turbidity": "NTU",
     "pressure": "dbar",
+    "conductivity": "mS cm⁻¹",
     "cdom": "m⁻¹",
 }
 

@@ -5,7 +5,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from colors import STATION_COLOR, UNASSIGNED_COLOR
+from colors import STATION_COLOR, UNASSIGNED_COLOR, variable_color
 from data import (
     as_scalar,
     as_str,
@@ -566,7 +566,7 @@ def data_distribution_plot(ds, selected_ids=None, date_filter="All", figsize=(10
     vars_to_plot = [
         v
         for v in ds_sub.data_vars
-        if v not in ["lat", "lon", "depth", "time", "cast_type", "station_name"]
+        if v not in ["lat", "lon", "depth", "time", "cast", "cast_type", "station_name", "community"]
     ]
     ax_flat = axes.flatten()
 
@@ -577,12 +577,14 @@ def data_distribution_plot(ds, selected_ids=None, date_filter="All", figsize=(10
         var = vars_to_plot[i]
         vals = np.ravel(ds_sub[var].values)
         valid_vals = vals[np.isfinite(vals)]
+        units = get_units(var)
+        xlabel = f"{var} ({units})" if units else var
         if valid_vals.size > 0:
-            ax.hist(valid_vals, bins=20, edgecolor="w", facecolor="#1b4332")
-            ax.set_title(var)
+            ax.hist(valid_vals, bins=20, facecolor=variable_color(var), edgecolor="w", linewidth=1)
         else:
             ax.text(0.5, 0.5, "No Data", ha="center", va="center")
-            ax.set_title(var)
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel("Count")
 
     fig.tight_layout()
     return fig

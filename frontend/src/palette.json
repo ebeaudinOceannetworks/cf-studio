@@ -1,4 +1,17 @@
 {
   "station": "#2d6a4f",
-  "unassigned": "#e07a2f"
+  "unassigned": "#e07a2f",
+  "variables": {
+    "temperature": "#0a2f6b",
+    "potential temperature": "#0a2f6b",
+    "practical salinity": "#dc2626",
+    "salinity": "#dc2626",
+    "density": "#ea7a1c",
+    "turbidity": "#c2410c",
+    "pressure": "#b91c1c",
+    "sound speed": "#4169e1",
+    "conductivity": "#8b0000",
+    "oxygen saturation": "#5b21b6",
+    "chlorophyll": "#84cc16"
+  }
 }

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Plot from 'react-plotly.js';
-import { STATION_COLOR, UNASSIGNED_COLOR } from './colors';
+import { STATION_COLOR, UNASSIGNED_COLOR, variableColor, variableXLabel } from './colors';
 
 interface WidgetProps {
   id: string;
@@ -446,7 +446,8 @@ export default function PlotWidget({
         x: p.values,
         type: 'histogram',
         name: p.variable,
-        marker: { color: STATION_COLOR },
+        showlegend: false,
+        marker: { color: p.color || variableColor(p.variable), line: { color: '#ffffff', width: 1 } },
         xaxis: i === 0 ? 'x' : `x${i + 1}`,
         yaxis: i === 0 ? 'y' : `y${i + 1}`,
       }));
@@ -560,7 +561,19 @@ export default function PlotWidget({
       };
     }
     if (plotData?.plot_type === 'distribution') {
-      return { ...base, grid: { rows: 3, columns: 3, pattern: 'independent' }, margin: { t: 30, b: 30, l: 40, r: 16 } };
+      const layout: any = {
+        ...base,
+        showlegend: false,
+        grid: { rows: 3, columns: 3, pattern: 'independent', xgap: 0.12, ygap: 0.22 },
+        margin: { t: 16, b: 52, l: 52, r: 16 },
+      };
+      (plotData.panels || []).forEach((p: any, i: number) => {
+        const xkey = i === 0 ? 'xaxis' : `xaxis${i + 1}`;
+        const ykey = i === 0 ? 'yaxis' : `yaxis${i + 1}`;
+        layout[xkey] = { ...axis, title: { text: variableXLabel(p.variable, p.units), font: { size: 10 } } };
+        layout[ykey] = { ...axis, title: { text: 'Count', font: { size: 10 } } };
+      });
+      return layout;
     }
     return base;
   };

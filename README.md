@@ -45,15 +45,9 @@ Vite (`http://127.0.0.1:5173`) proxies `/api` to port 8000.
 
 ## Get Bathymetry Data
 
-West coast: in the terminal/command prompt, run this command, example for Prince Rupert Port Authority:
+**West coast**
 
-`gdal_translate \`
+Command prompt example for Prince Rupert Port Authority:
 
-  `-projwin -130.541267 54.443444 -130.182607 54.148639 \`
-
-  `-projwin_srs EPSG:4326 \`
-
-  `'OpenFileGDB:"/vsizip//vsicurl/https://ftp.maps.canada.ca/pub/nrcan_rncan/Topography_Topographie/canada_west_coast_DEM-MNA_cote_ouest_canada/canada_west_coast_DEM_original.gdb.zip":WEST_COAST_DEM' \`
-
-  `prince_rupert_dem.tif`
+`gdal_translate -projwin -130.541267 54.443444 -130.182607 54.148639 -projwin_srs EPSG:4326  'OpenFileGDB:"/vsizip//vsicurl/https://ftp.maps.canada.ca/pub/nrcan_rncan/Topography_Topographie/canada_west_coast_DEM-MNA_cote_ouest_canada/canada_west_coast_DEM_original.gdb.zip":WEST_COAST_DEM' prince_rupert_dem.tif`
 

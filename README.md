@@ -17,7 +17,7 @@ The script creates `.venv` if needed, installs Python deps, builds `frontend/`, 
 
 ## Use
 
-1. Enter a folder that contains `.cor` files and click **Load folder**.
+1. Enter a folder that contains `.cor` files and click **Load folder**. That only reads headers (station, date, location). Profiles are parsed when you select a station.
 2. **Remember path** writes that folder to `data_folder.txt` (local only; not committed) so the next start opens it again.
 3. **Explore** is the map and sampling calendar. Click a station; Shift-click to add more.
 4. **Studio** is an interactive Plotly figure (hover, zoom, pan). **Customize** edits title, size, and style on that same figure.

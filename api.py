@@ -1,5 +1,6 @@
 import io
 import os
+import threading
 from typing import List, Optional
 
 import matplotlib.pyplot as plt
@@ -14,6 +15,7 @@ from pydantic import BaseModel
 
 import data
 import plotting
+import transect_dijkstra as bathy
 from attributions import data_attributions
 from colors import STATION_COLOR, UNASSIGNED_COLOR, variable_color
 
@@ -36,14 +38,20 @@ PLOT_TYPES = [
     "Overview (Selected vs Depth)",
     "Transect (Filled Contour)",
     "Transect (Pixel Mesh)",
+    "Timeseries at Station",
     "Depth Profile (Mean + 1 Std)",
     "T-S Diagram",
     "Seasonal Profiles",
     "Sampling Days Timeline",
+    "Sampling History",
     "Data Distribution",
 ]
 
 ds_all = None
+catalog = []
+catalog_vars = []
+file_cache = {}
+data_lock = threading.Lock()
 
 
 def read_saved_folder() -> str:
@@ -68,10 +76,45 @@ current_folder = read_saved_folder()
 
 
 def load_data_from_path(path_dir: str):
-    global ds_all, current_folder
-    ds_all, count = data.load_folder(path_dir)
-    current_folder = path_dir
-    return count
+    global ds_all, catalog, catalog_vars, file_cache, current_folder
+    indexed, variables = data.index_folder(path_dir)
+    with data_lock:
+        catalog = indexed
+        catalog_vars = variables
+        file_cache = {}
+        ds_all = None
+        current_folder = path_dir
+    bathy.invalidate_coverages()
+    return len({e["path"] for e in indexed})
+
+
+def files_for_selection(selected_ids):
+    return data.files_for_selection(catalog, selected_ids)
+
+
+def ensure_selection(selected_ids):
+    global ds_all
+    paths = files_for_selection(selected_ids)
+    with data_lock:
+        if not paths:
+            ds_all = None
+            return None
+        for path in paths:
+            if path in file_cache:
+                continue
+            try:
+                file_cache[path] = data.parse_cor(path)
+            except Exception as err:
+                print(f"Skipped {os.path.basename(path)}: {err}")
+        ds_list = [file_cache[p] for p in paths if p in file_cache]
+        if not ds_list:
+            ds_all = None
+            return None
+        if len(ds_list) == 1:
+            ds_all = ds_list[0]
+        else:
+            ds_all = xr.concat(ds_list, dim="cast", join="outer").sortby("depth")
+        return ds_all
 
 
 try:
@@ -105,6 +148,8 @@ class PlotStyle(BaseModel):
     num_density_lines: int = 5
     overlay_color: str = "black"
     overlay_labels: bool = True
+    add_bathymetry: bool = True
+    bathymetry_style: str = "filled"
     num_std: float = 1
     marker_size: float = 8
     line_width: float = 2.5
@@ -139,14 +184,14 @@ def build_attribution_string(community_name, station_code=None):
 
 
 def community_for_selection(selected_ids):
-    if ds_all is None or not selected_ids:
+    if not selected_ids:
         return "Ocean Networks Canada Society"
-    for c in ds_all.cast.values:
-        cast_ds = ds_all.sel(cast=c)
-        st_name = data.as_str(cast_ds.station_name.values)
-        if st_name in selected_ids or str(c) in selected_ids:
-            if "community" in cast_ds:
-                return data.as_str(cast_ds.community.values)
+    wanted = set(selected_ids)
+    for entry in catalog:
+        if entry["station_name"] in wanted or entry["cast_id"] in wanted:
+            community = entry.get("community")
+            if community and community != "Unknown":
+                return community
     return "Ocean Networks Canada Society"
 
 
@@ -175,6 +220,8 @@ def style_dict(req: PlotStyle, attribution_text: str):
         "num_density_lines": req.num_density_lines,
         "overlay_color": req.overlay_color,
         "overlay_labels": req.overlay_labels,
+        "add_bathymetry": req.add_bathymetry,
+        "bathymetry_style": req.bathymetry_style,
         "num_std": req.num_std,
         "marker_size": req.marker_size,
         "line_width": req.line_width,
@@ -198,6 +245,29 @@ def set_folder(req: FolderRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+class DrawTransectRequest(BaseModel):
+    stations: List[List[float]]
+    tif_file: Optional[str] = None
+
+
+@app.post("/api/draw-transect")
+def draw_transect_path(req: DrawTransectRequest):
+    stations = []
+    for pair in req.stations or []:
+        if not pair or len(pair) < 2:
+            continue
+        stations.append((float(pair[0]), float(pair[1])))
+    if len(stations) < 2:
+        raise HTTPException(status_code=400, detail="Transect needs at least 2 stations.")
+    try:
+        return bathy.draw_transect(stations, tif_file=req.tif_file, data_folder=current_folder)
+    except Exception as e:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/remember_folder")
 def remember_folder(req: FolderRequest):
     path = os.path.abspath(os.path.expanduser((req.folder_path or "").strip()))
@@ -211,7 +281,7 @@ def remember_folder(req: FolderRequest):
 
 @app.get("/api/summary")
 def get_summary():
-    if ds_all is None:
+    if not catalog:
         return {
             "total_casts": 0,
             "stations": [],
@@ -221,34 +291,35 @@ def get_summary():
             "nations": [],
             "palette": {"station": STATION_COLOR, "unassigned": UNASSIGNED_COLOR},
             "default_folder": current_folder,
+            "bathy_coverages": bathy.list_coverages(current_folder),
+            "bathy_skipped": bathy.list_skipped(current_folder),
+            "max_bathy_mb": int(bathy.MAX_BATHY_MB),
         }
 
     unique_markers, date_counts = {}, {}
     unassigned_n = 0
     total_valid_casts = 0
     all_nations = set()
-    excluded_dims = {"lat", "lon", "depth", "time", "cast", "station_name", "cast_type", "community"}
-    detected_vars = [v for v in list(ds_all.data_vars.keys()) if v not in excluded_dims]
+    detected_vars = list(catalog_vars)
 
-    for c in ds_all.cast.values:
-        cast_ds = ds_all.sel(cast=c)
+    for entry in catalog:
         try:
-            lat = data.as_float(cast_ds.lat.values)
-            lon = data.as_float(cast_ds.lon.values)
+            lat = float(entry["lat"])
+            lon = float(entry["lon"])
         except Exception:
             continue
         if np.isnan(lat) or np.isnan(lon):
             continue
 
         total_valid_casts += 1
-        st_name = data.as_str(cast_ds.station_name.values)
-        c_type = data.as_str(cast_ds.cast_type.values)
-        community = data.as_str(cast_ds.community.values) if "community" in cast_ds else "Unknown"
-        cast_name = data.as_str(cast_ds.cast_name.values) if "cast_name" in cast_ds else ""
+        st_name = entry["station_name"]
+        c_type = entry["cast_type"]
+        community = entry.get("community") or "Unknown"
+        cast_name = entry.get("cast_name") or ""
         if community != "Unknown":
             all_nations.add(community)
 
-        this_date = data.cast_date(cast_ds)
+        this_date = entry.get("date") or "Unknown"
         if this_date != "Unknown":
             date_counts[this_date] = date_counts.get(this_date, 0) + 1
 
@@ -260,7 +331,7 @@ def get_summary():
             cast_number = None
             label = st_name
         else:
-            marker_key = str(c)
+            marker_key = entry["cast_id"]
             color = UNASSIGNED_COLOR
             kind = "unassigned"
             unassigned_n += 1
@@ -318,6 +389,9 @@ def get_summary():
         "nations": sorted(list(all_nations)),
         "palette": {"station": STATION_COLOR, "unassigned": UNASSIGNED_COLOR},
         "default_folder": current_folder,
+        "bathy_coverages": bathy.list_coverages(current_folder),
+        "bathy_skipped": bathy.list_skipped(current_folder),
+        "max_bathy_mb": int(bathy.MAX_BATHY_MB),
     }
 
 
@@ -333,7 +407,12 @@ def plot_transect_payload(req: PlotStyle, attribution_text: str):
     data_transect = ds_all.sel(cast=deepest).transpose("depth", "cast")
     lats = np.ravel(data_transect.lat.values)
     lons = np.ravel(data_transect.lon.values)
-    cast_dist = data.transect_distances(lats, lons)
+    stations = list(zip(lats.tolist(), lons.tolist()))
+    bathy_info = bathy.draw_transect(stations, data_folder=current_folder)
+    if bathy_info.get("used_mask") and bathy_info.get("station_distances"):
+        cast_dist = np.asarray(bathy_info["station_distances"], dtype=float)
+    else:
+        cast_dist = data.transect_distances(lats, lons)
 
     z_primary = clean_list(data_transect[req.variable].values)
     z_secondary = None
@@ -349,6 +428,10 @@ def plot_transect_payload(req: PlotStyle, attribution_text: str):
         z_secondary = [row for row, keep in zip(z_secondary, mask) if keep]
 
     clim_min, clim_max = data.resolve_clim(req.variable, req.vmin, req.vmax)
+    bathy_depth = bathy_info.get("bathy_depth") or []
+    finite_bathy = [v for v in bathy_depth if v is not None]
+    if finite_bathy:
+        hi = max(float(hi), float(np.nanmax(finite_bathy)))
     return {
         "plot_type": "transect",
         "x_dist": cast_dist.tolist(),
@@ -366,6 +449,102 @@ def plot_transect_payload(req: PlotStyle, attribution_text: str):
         "depth_max": hi,
         "vmin": clim_min,
         "vmax": clim_max,
+        "date": date_filter,
+        "title": f"Transect: {date_filter} ({req.variable})",
+        "attribution": attribution_text,
+        "used_mask": bool(bathy_info.get("used_mask")),
+        "bathy_dist": bathy_info.get("bathy_dist"),
+        "bathy_depth": bathy_info.get("bathy_depth"),
+        "bathy_name": bathy_info.get("name"),
+    }
+
+
+def _iso_time(val):
+    t = pd.to_datetime(data.as_scalar(val), errors="coerce")
+    if pd.isna(t):
+        return None
+    return pd.Timestamp(t).isoformat()
+
+
+def plot_timeseries_payload(req: PlotStyle, attribution_text: str):
+    station_ids = list(req.selected_ids[-1:]) if req.selected_ids else []
+    matching = data.match_casts(ds_all, station_ids, "All")
+    ordered = data.casts_by_time(ds_all, matching, req.variable)
+    if len(ordered) < 2:
+        return {"error": "Timeseries needs at least 2 casts at the selected station."}
+    if req.variable not in ds_all:
+        return {"error": f"Variable '{req.variable}' not available."}
+
+    data_ts = ds_all.sel(cast=ordered).transpose("depth", "cast")
+    z_primary = clean_list(data_ts[req.variable].values)
+    z_secondary = None
+    if req.secondary_variable and req.secondary_variable != "None" and req.secondary_variable in data_ts:
+        z_secondary = clean_list(data_ts[req.secondary_variable].values)
+
+    depths = data_ts.depth.values
+    lo, hi = data.valid_depth_extent(ds_all, ordered, req.variable, req.depth_min, req.depth_max)
+    mask = (depths >= lo) & (depths <= hi)
+    depths = depths[mask]
+    z_primary = [row for row, keep in zip(z_primary, mask) if keep]
+    if z_secondary:
+        z_secondary = [row for row, keep in zip(z_secondary, mask) if keep]
+
+    times = [_iso_time(t) for t in data_ts.time.values]
+    names = data.unique_station_labels(ds_all, ordered)
+    title = names[0] if len(names) == 1 else (", ".join(names) if names else "Selected casts")
+    clim_min, clim_max = data.resolve_clim(req.variable, req.vmin, req.vmax)
+    return {
+        "plot_type": "timeseries",
+        "x_time": times,
+        "y_depth": depths.tolist(),
+        "z_primary": z_primary,
+        "z_secondary": z_secondary,
+        "primary_var": req.variable,
+        "secondary_var": req.secondary_variable,
+        "stations": [data.as_str(s) for s in data_ts.station_name.values],
+        "cast_types": [data.as_str(t) for t in data_ts.cast_type.values],
+        "title": title,
+        "units_primary": data.get_units(req.variable),
+        "units_secondary": data.get_units(req.secondary_variable or ""),
+        "colorscale": data.get_plotly_colorscale(req.variable, req.colormap),
+        "depth_min": lo,
+        "depth_max": hi,
+        "vmin": clim_min,
+        "vmax": clim_max,
+        "attribution": attribution_text,
+    }
+
+
+def plot_history_payload(req: PlotStyle, attribution_text: str):
+    matching = data.match_casts(ds_all, req.selected_ids, req.date_filter)
+    if not matching:
+        return {"error": "No casts available for sampling history."}
+
+    rows = {}
+    unassigned = []
+    for c in matching:
+        cast_ds = ds_all.sel(cast=c)
+        t = _iso_time(cast_ds.time.values)
+        if t is None:
+            continue
+        if data.is_station_cast(cast_ds):
+            name = data.as_str(cast_ds.station_name.values)
+            rows.setdefault(name, []).append(t)
+        else:
+            unassigned.append(t)
+
+    labels = sorted(rows)
+    series = [{"name": name, "times": rows[name], "kind": "station"} for name in labels]
+    if unassigned:
+        series.append({"name": "Unassigned", "times": unassigned, "kind": "unassigned"})
+    if not series:
+        return {"error": "No casts available for sampling history."}
+    return {
+        "plot_type": "history",
+        "series": series,
+        "n_casts": len(matching),
+        "station_color": STATION_COLOR,
+        "unassigned_color": UNASSIGNED_COLOR,
         "attribution": attribution_text,
     }
 
@@ -559,16 +738,27 @@ def plot_seasonal_payload(req: PlotStyle, attribution_text: str):
 
 
 def plot_sampling_payload(req: PlotStyle, attribution_text: str):
-    matching = data.match_casts(ds_all, req.selected_ids, req.date_filter) if req.selected_ids else list(ds_all.cast.values)
-    if not matching:
+    wanted = set(req.selected_ids or [])
+    counts = {}
+    for entry in catalog:
+        if wanted and entry["station_name"] not in wanted and entry["cast_id"] not in wanted:
+            continue
+        day = entry.get("date") or "Unknown"
+        if not data.date_matches(day, req.date_filter) or day == "Unknown":
+            continue
+        bucket = counts.setdefault(day, [0, 0])
+        if entry["cast_type"] == "station" and entry["station_name"] not in ("nan", "Unassigned Cast Data", ""):
+            bucket[0] += 1
+        else:
+            bucket[1] += 1
+    if not counts:
         return {"error": "No casts available for sampling timeline."}
-    ds_sub = ds_all.sel(cast=matching)
-    dates, station_counts, unassigned_counts = data.sampling_day_counts(ds_sub)
+    dates = sorted(counts)
     return {
         "plot_type": "sampling",
         "dates": dates,
-        "station_counts": station_counts,
-        "unassigned_counts": unassigned_counts,
+        "station_counts": [counts[d][0] for d in dates],
+        "unassigned_counts": [counts[d][1] for d in dates],
         "station_color": STATION_COLOR,
         "unassigned_color": UNASSIGNED_COLOR,
         "attribution": attribution_text,
@@ -576,6 +766,8 @@ def plot_sampling_payload(req: PlotStyle, attribution_text: str):
 
 
 def plot_distribution_payload(req: PlotStyle, attribution_text: str):
+    if ds_all is None:
+        return {"error": "Select stations to load profiles."}
     matching = data.match_casts(ds_all, req.selected_ids, req.date_filter) if req.selected_ids else list(ds_all.cast.values)
     if not matching:
         return {"error": "No casts available for data distribution."}
@@ -602,22 +794,32 @@ def plot_distribution_payload(req: PlotStyle, attribution_text: str):
 
 @app.post("/api/plot_data")
 def get_plot_data(req: PlotStyle):
-    if ds_all is None:
+    if not catalog:
         raise HTTPException(status_code=400, detail="No data loaded.")
 
     try:
-        attribution_text = build_attribution_string(community_for_selection(req.selected_ids))
         kind = req.plot_type
+        if "Sampling Days" not in kind:
+            loaded = ensure_selection(req.selected_ids)
+            if loaded is None:
+                if not req.selected_ids:
+                    return {"error": "Select stations to load profiles."}
+                return {"error": "Could not load profiles for the selected stations."}
+        attribution_text = build_attribution_string(community_for_selection(req.selected_ids))
         if "Overview" in kind:
             return plot_overview_payload(req, attribution_text)
         if "Transect" in kind:
             return plot_transect_payload(req, attribution_text)
+        if "Timeseries" in kind or "Time Series" in kind:
+            return plot_timeseries_payload(req, attribution_text)
         if "Profile" in kind and "Season" not in kind:
             return plot_profile_payload(req, attribution_text)
         if "T-S" in kind or "T–S" in kind:
             return plot_ts_payload(req, attribution_text)
         if "Season" in kind:
             return plot_seasonal_payload(req, attribution_text)
+        if "History" in kind:
+            return plot_history_payload(req, attribution_text)
         if "Sampling" in kind:
             return plot_sampling_payload(req, attribution_text)
         if "Distribution" in kind:
@@ -632,8 +834,11 @@ def get_plot_data(req: PlotStyle):
 
 @app.post("/api/export")
 def export_plot(req: PlotStyle):
-    if ds_all is None:
+    if not catalog:
         raise HTTPException(status_code=400, detail="No data loaded.")
+    if "Sampling Days" not in (req.plot_type or ""):
+        if ensure_selection(req.selected_ids) is None:
+            raise HTTPException(status_code=400, detail="Select stations to load profiles.")
 
     fmt = (req.format or "png").lower()
     if fmt not in {"png", "svg", "pdf"}:

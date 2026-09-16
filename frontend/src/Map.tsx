@@ -1,5 +1,6 @@
-import { useEffect, useRef } from 'react';
-import { MapContainer, TileLayer, CircleMarker, Tooltip, Polyline, useMap } from 'react-leaflet';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import L from 'leaflet';
+import { MapContainer, TileLayer, CircleMarker, Tooltip, Polyline, Rectangle, useMap, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import { STATION_COLOR, UNASSIGNED_COLOR, isUnassignedStation } from './colors';
 
@@ -20,6 +21,21 @@ function dayOfYear(iso: string): number {
 function markerFill(st: any) {
   if (st.color) return st.color;
   return isUnassignedStation(st) ? UNASSIGNED_COLOR : STATION_COLOR;
+}
+
+function stackKey(lat: number, lon: number) {
+  return `${Number(lat).toFixed(4)},${Number(lon).toFixed(4)}`;
+}
+
+function groupStations(stations: any[]) {
+  const groups = new Map<string, { key: string; lat: number; lon: number; members: any[] }>();
+  for (const st of stations) {
+    const key = stackKey(st.lat, st.lon);
+    const g = groups.get(key);
+    if (g) g.members.push(st);
+    else groups.set(key, { key, lat: st.lat, lon: st.lon, members: [st] });
+  }
+  return [...groups.values()];
 }
 
 function SamplingMiniGrid({ dates, color }: { dates: string[]; color: string }) {
@@ -145,10 +161,15 @@ interface MapProps {
   showStations: boolean;
   showUnassigned: boolean;
   showTimeline: boolean;
+  showBathyCoverage: boolean;
+  bathyCoverages?: { name: string; bounds: [[number, number], [number, number]] }[];
+  bathySkipped?: { name: string; size_mb: number; max_mb: number; reason: string }[];
+  maxBathyMb?: number;
   onDrawTransect: (on: boolean) => void;
   onShowStations: (on: boolean) => void;
   onShowUnassigned: (on: boolean) => void;
   onShowTimeline: (on: boolean) => void;
+  onShowBathyCoverage: (on: boolean) => void;
   focus?: { lats: number[]; lons: number[]; token: string } | null;
   active?: boolean;
   onStationSelect: (id: string, shiftKey: boolean) => void;
@@ -186,6 +207,120 @@ function MapResize({ active }: { active: boolean }) {
   return null;
 }
 
+function MapClickClose({ onClose }: { onClose: () => void }) {
+  useMapEvents({
+    click: () => onClose(),
+  });
+  return null;
+}
+
+function stopMarkerClick(e: any) {
+  L.DomEvent.stopPropagation(e);
+  const orig = e.originalEvent as MouseEvent | undefined;
+  orig?.stopPropagation();
+}
+
+function StationPin({
+  st,
+  center,
+  selectedIds,
+  showTimeline,
+  onStationSelect,
+}: {
+  st: any;
+  center?: [number, number];
+  selectedIds: string[];
+  showTimeline: boolean;
+  onStationSelect: (id: string, shiftKey: boolean) => void;
+}) {
+  const isSelected = selectedIds.includes(st.id);
+  const selectedIndex = selectedIds.indexOf(st.id);
+  const pinColor = isSelected ? SELECTED_COLOR : markerFill(st);
+  return (
+    <CircleMarker
+      center={center || [st.lat, st.lon]}
+      radius={isSelected ? 10 : 7}
+      pathOptions={{
+        color: pinColor,
+        fillColor: pinColor,
+        opacity: 1,
+        fillOpacity: 0.4,
+        weight: isSelected ? 3 : 2,
+      }}
+      eventHandlers={{
+        click: (e) => {
+          stopMarkerClick(e);
+          onStationSelect(st.id, !!(e.originalEvent as MouseEvent)?.shiftKey);
+        },
+      }}
+    >
+      <Tooltip direction="top" offset={[0, -10]} opacity={1} className="marker-tip-wrap">
+        {markerTooltip(st, isSelected, selectedIndex, selectedIds.length, showTimeline, pinColor)}
+      </Tooltip>
+    </CircleMarker>
+  );
+}
+
+function SpiderGroup({
+  group,
+  selectedIds,
+  showTimeline,
+  onStationSelect,
+}: {
+  group: { lat: number; lon: number; members: any[] };
+  selectedIds: string[];
+  showTimeline: boolean;
+  onStationSelect: (id: string, shiftKey: boolean) => void;
+}) {
+  const map = useMap();
+  const n = group.members.length;
+  const [arms, setArms] = useState<[number, number][]>([]);
+
+  const layout = () => {
+    const origin = map.latLngToLayerPoint([group.lat, group.lon]);
+    const R = Math.max(32, 20 + n * 5);
+    const next: [number, number][] = [];
+    for (let i = 0; i < n; i++) {
+      const a = (2 * Math.PI * i) / n - Math.PI / 2;
+      const ll = map.layerPointToLatLng(L.point(origin.x + R * Math.cos(a), origin.y + R * Math.sin(a)));
+      next.push([ll.lat, ll.lng]);
+    }
+    setArms(next);
+  };
+
+  useEffect(layout, [group.lat, group.lon, n, map]);
+  useMapEvents({ zoomend: layout, moveend: layout });
+
+  return (
+    <>
+      <CircleMarker
+        center={[group.lat, group.lon]}
+        radius={4}
+        pathOptions={{ color: '#5a7268', fillColor: '#5a7268', fillOpacity: 0.8, weight: 1 }}
+        eventHandlers={{ click: stopMarkerClick }}
+      />
+      {group.members.map((st, i) => {
+        const dest = arms[i] || [st.lat, st.lon];
+        return (
+          <Fragment key={st.id}>
+            <Polyline
+              positions={[[group.lat, group.lon], dest]}
+              pathOptions={{ color: '#5a7268', weight: 1.5, opacity: 0.55 }}
+            />
+            <StationPin
+              st={st}
+              center={dest}
+              selectedIds={selectedIds}
+              showTimeline={showTimeline}
+              onStationSelect={onStationSelect}
+            />
+          </Fragment>
+        );
+      })}
+    </>
+  );
+}
+
 export default function MapView({
   stations,
   selectedIds,
@@ -194,20 +329,62 @@ export default function MapView({
   showStations,
   showUnassigned,
   showTimeline,
+  showBathyCoverage,
+  bathyCoverages = [],
+  bathySkipped = [],
+  maxBathyMb = 100,
   onDrawTransect,
   onShowStations,
   onShowUnassigned,
   onShowTimeline,
+  onShowBathyCoverage,
   focus,
   active = true,
   onStationSelect,
 }: MapProps) {
+  const [openStack, setOpenStack] = useState<string | null>(null);
+  const [routedPath, setRoutedPath] = useState<[number, number][] | null>(null);
+  const groups = useMemo(() => groupStations(stations), [stations]);
+
   const transectCoords: [number, number][] = selectedIds
     .map((id) => {
       const st = stations.find((s) => s.id === id);
       return st ? [st.lat, st.lon] as [number, number] : null;
     })
     .filter((coord): coord is [number, number] => coord !== null);
+
+  useEffect(() => {
+    if (!drawTransect || transectCoords.length < 2) {
+      setRoutedPath(null);
+      return;
+    }
+    const ac = new AbortController();
+    const timer = window.setTimeout(() => {
+      fetch('/api/draw-transect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stations: transectCoords }),
+        signal: ac.signal,
+      })
+        .then(async (res) => {
+          const json = await res.json();
+          if (!res.ok) throw new Error(json.detail || 'Transect routing failed');
+          if (json.used_mask && Array.isArray(json.path) && json.path.length > 1) {
+            setRoutedPath(json.path.map((p: number[]) => [p[0], p[1]] as [number, number]));
+          } else {
+            setRoutedPath(null);
+          }
+        })
+        .catch((err) => {
+          if (err.name === 'AbortError') return;
+          setRoutedPath(null);
+        });
+    }, 200);
+    return () => {
+      window.clearTimeout(timer);
+      ac.abort();
+    };
+  }, [drawTransect, transectCoords.map((p) => p.join(',')).join('|')]);
 
   const center: [number, number] = stations.length
     ? [stations[0].lat, stations[0].lon]
@@ -232,6 +409,22 @@ export default function MapView({
           <input type="checkbox" checked={showTimeline} onChange={(e) => onShowTimeline(e.target.checked)} />
           Sampling timeline
         </label>
+        <label
+          className="check"
+          title={
+            bathySkipped.length
+              ? bathySkipped.map((item) => item.reason).join(' · ')
+              : `GeoTIFFs up to ${maxBathyMb} MB`
+          }
+        >
+          <input type="checkbox" checked={showBathyCoverage} onChange={(e) => onShowBathyCoverage(e.target.checked)} />
+          Bathymetry coverage
+        </label>
+        {bathySkipped.length > 0 && (
+          <span className="muted" title={bathySkipped.map((item) => item.reason).join('\n')}>
+            skipped {bathySkipped.length} raster{bathySkipped.length === 1 ? '' : 's'} over {maxBathyMb} MB
+          </span>
+        )}
       </div>
       <MapContainer center={center} zoom={4} style={{ height: '100%', width: '100%' }}>
         <TileLayer
@@ -240,36 +433,77 @@ export default function MapView({
         />
         <MapFocus focus={focus} />
         <MapResize active={active} />
+        <MapClickClose onClose={() => setOpenStack(null)} />
 
+        {showBathyCoverage && bathyCoverages.map((item) => (
+          <Rectangle
+            key={item.name}
+            bounds={item.bounds}
+            pathOptions={{ color: '#8b0000', weight: 2, fill: false }}
+          />
+        ))}
         {showLine && transectCoords.length > 1 && (
           <Polyline
-            positions={transectCoords}
-            pathOptions={{ color: '#00b4d8', weight: 4, opacity: 0.85, dashArray: '8, 8' }}
+            positions={routedPath && routedPath.length > 1 ? routedPath : transectCoords}
+            pathOptions={{
+              color: '#00b4d8',
+              weight: 4,
+              opacity: 0.85,
+              dashArray: routedPath && routedPath.length > 1 ? undefined : '8, 8',
+            }}
           />
         )}
 
-        {stations.map((st, i) => {
-          const isSelected = selectedIds.includes(st.id);
-          const selectedIndex = selectedIds.indexOf(st.id);
-          const pinColor = isSelected ? SELECTED_COLOR : markerFill(st);
+        {groups.map((group) => {
+          if (group.members.length === 1) {
+            const st = group.members[0];
+            return (
+              <StationPin
+                key={st.id}
+                st={st}
+                selectedIds={selectedIds}
+                showTimeline={showTimeline}
+                onStationSelect={onStationSelect}
+              />
+            );
+          }
+          if (openStack === group.key) {
+            return (
+              <SpiderGroup
+                key={group.key}
+                group={group}
+                selectedIds={selectedIds}
+                showTimeline={showTimeline}
+                onStationSelect={onStationSelect}
+              />
+            );
+          }
+          const anySelected = group.members.some((st) => selectedIds.includes(st.id));
+          const pinColor = anySelected ? SELECTED_COLOR : markerFill(group.members[0]);
           return (
             <CircleMarker
-              key={`${st.id}-${i}`}
-              center={[st.lat, st.lon]}
-              radius={isSelected ? 10 : 7}
+              key={group.key}
+              center={[group.lat, group.lon]}
+              radius={11}
               pathOptions={{
                 color: pinColor,
                 fillColor: pinColor,
                 opacity: 1,
-                fillOpacity: 0.4,
-                weight: isSelected ? 3 : 2,
+                fillOpacity: 0.45,
+                weight: anySelected ? 3 : 2,
               }}
               eventHandlers={{
-                click: (e) => onStationSelect(st.id, !!(e.originalEvent as MouseEvent)?.shiftKey),
+                click: (e) => {
+                  stopMarkerClick(e);
+                  setOpenStack(group.key);
+                },
               }}
             >
               <Tooltip direction="top" offset={[0, -10]} opacity={1} className="marker-tip-wrap">
-                {markerTooltip(st, isSelected, selectedIndex, selectedIds.length, showTimeline, pinColor)}
+                <div className="marker-tip">
+                  <b>{group.members.length} stations here</b>
+                  <div className="marker-tip-nation">Click to spread the pins apart</div>
+                </div>
               </Tooltip>
             </CircleMarker>
           );

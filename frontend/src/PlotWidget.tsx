@@ -8,6 +8,7 @@ interface WidgetProps {
   availablePlotTypes: string[];
   availableDates: { date: string; label: string }[];
   selectedStations: string[];
+  selectedLabels: string[];
   globalDate: string;
   visible: boolean;
 }
@@ -31,8 +32,10 @@ const PRESETS: Record<string, { w: string; h: string; canvas: string }> = {
   profile: { w: '4', h: '6', canvas: 'portrait' },
   seasonal: { w: '4', h: '6', canvas: 'portrait' },
   transect: { w: '12', h: '4', canvas: 'landscape' },
+  timeseries: { w: '8', h: '4', canvas: 'landscape' },
   ts: { w: '6', h: '6', canvas: 'square' },
   sampling: { w: '12', h: '4', canvas: 'wide' },
+  history: { w: '8', h: '6', canvas: 'landscape' },
   distribution: { w: '10', h: '8', canvas: 'square' },
 };
 
@@ -120,9 +123,11 @@ function withAlpha(color: string, a: number) {
 function plotKind(plotType: string) {
   if (plotType.includes('Overview')) return 'overview';
   if (plotType.includes('Transect')) return 'transect';
+  if (plotType.includes('Timeseries') || plotType.includes('Time Series')) return 'timeseries';
   if (plotType.includes('Season')) return 'seasonal';
   if (plotType.includes('Profile')) return 'profile';
   if (plotType.includes('T-S') || plotType.includes('T–S')) return 'ts';
+  if (plotType.includes('History')) return 'history';
   if (plotType.includes('Sampling')) return 'sampling';
   if (plotType.includes('Distribution')) return 'distribution';
   return 'other';
@@ -130,16 +135,19 @@ function plotKind(plotType: string) {
 
 function controlsFor(kind: string, colorBy: string) {
   const colored = kind === 'ts' && colorBy !== 'Season';
+  const filled = kind === 'transect' || kind === 'timeseries';
   return {
-    variable: ['overview', 'transect', 'profile', 'seasonal'].includes(kind),
-    overlay: kind === 'transect',
-    date: kind !== 'distribution',
+    variable: ['overview', 'transect', 'timeseries', 'profile', 'seasonal'].includes(kind),
+    overlay: filled,
+    bathymetry: kind === 'transect',
+    date: kind !== 'distribution' && kind !== 'timeseries',
+    station: kind === 'timeseries',
     colorBy: kind === 'ts',
-    colorbar: kind === 'transect' || colored,
-    depth: ['overview', 'transect', 'profile', 'seasonal'].includes(kind),
-    vlim: kind === 'transect' || (kind === 'ts' && colorBy !== 'Season' && colorBy.toLowerCase() !== 'depth'),
-    colormap: kind === 'transect' || colored,
-    contours: kind === 'transect',
+    colorbar: filled || colored,
+    depth: ['overview', 'transect', 'timeseries', 'profile', 'seasonal'].includes(kind),
+    vlim: filled || (kind === 'ts' && colorBy !== 'Season' && colorBy.toLowerCase() !== 'depth'),
+    colormap: filled || colored,
+    contours: filled,
     std: kind === 'profile',
     marker: kind === 'ts',
     line: ['overview', 'profile', 'seasonal'].includes(kind),
@@ -152,6 +160,7 @@ export default function PlotWidget({
   availablePlotTypes,
   availableDates,
   selectedStations,
+  selectedLabels = [],
   globalDate,
   visible,
 }: WidgetProps) {
@@ -165,6 +174,9 @@ export default function PlotWidget({
     || 'Overview (Selected vs Depth)'
   );
   const [selectedDate, setSelectedDate] = useState<string>(globalDate);
+  const [tsStation, setTsStation] = useState<string>(
+    selectedStations[selectedStations.length - 1] || ''
+  );
   const [showAttribution, setShowAttribution] = useState<boolean>(false);
   const [studioOpen, setStudioOpen] = useState<boolean>(false);
   const [saving, setSaving] = useState<boolean>(false);
@@ -183,6 +195,8 @@ export default function PlotWidget({
   const [numDensity, setNumDensity] = useState('5');
   const [overlayColor, setOverlayColor] = useState<'black' | 'white'>('black');
   const [overlayLabels, setOverlayLabels] = useState(true);
+  const [addBathy, setAddBathy] = useState(true);
+  const [bathyStyle, setBathyStyle] = useState<'filled' | 'outline'>('filled');
   const [numStd, setNumStd] = useState('1');
   const [markerSize, setMarkerSize] = useState('8');
   const [lineWidth, setLineWidth] = useState('2.5');
@@ -202,8 +216,12 @@ export default function PlotWidget({
   const kind = plotKind(plotType);
   const preset = PRESETS[kind] || PRESETS.overview;
   const show = controlsFor(kind, colorBy);
-  const needsSelection = kind !== 'sampling' && kind !== 'distribution';
-  const plotIds = selectedStations;
+  const needsSelection = kind !== 'sampling';
+  const lastSelected = selectedStations[selectedStations.length - 1] || '';
+  const timeseriesStation = selectedStations.includes(tsStation) ? tsStation : lastSelected;
+  const plotIds = kind === 'timeseries'
+    ? (timeseriesStation ? [timeseriesStation] : [])
+    : selectedStations;
   const plotFrameRef = useRef<HTMLDivElement | null>(null);
   const plotlyGd = useRef<any>(null);
   const fetchGen = useRef(0);
@@ -216,11 +234,19 @@ export default function PlotWidget({
 
   useEffect(() => { setSelectedDate(globalDate); }, [globalDate]);
   useEffect(() => {
+    if (lastSelected) setTsStation(lastSelected);
+  }, [lastSelected]);
+  useEffect(() => {
     if (availableVars.length && !availableVars.includes(activeVar)) setActiveVar(availableVars[0]);
   }, [availableVars, activeVar]);
   useEffect(() => {
     setFigWidth(preset.w);
     setFigHeight(preset.h);
+    if (kind === 'timeseries' || kind === 'history') setSelectedDate('All');
+    if (kind === 'timeseries' && lastSelected) setTsStation(lastSelected);
+    if (kind === 'timeseries' && availableVars.includes('Density') && secondaryVar === 'None') {
+      setSecondaryVar('Density');
+    }
   }, [plotType]);
 
   const stylePayload = () => ({
@@ -228,7 +254,7 @@ export default function PlotWidget({
     variable: activeVar,
     secondary_variable: secondaryVar,
     plot_type: plotType,
-    date_filter: effectiveDate,
+    date_filter: kind === 'timeseries' ? 'All' : effectiveDate,
     color_by: colorBy,
     title: title || null,
     xlabel: xlabel || null,
@@ -243,6 +269,8 @@ export default function PlotWidget({
     num_density_lines: Number(numDensity) || 5,
     overlay_color: overlayColor,
     overlay_labels: overlayLabels,
+    add_bathymetry: addBathy,
+    bathymetry_style: bathyStyle,
     num_std: Number(numStd) || 1,
     marker_size: Number(markerSize) || 8,
     line_width: Number(lineWidth) || 2.5,
@@ -387,6 +415,116 @@ export default function PlotWidget({
         });
       }
       const xs: number[] = plotData.x_dist || [];
+      const types: string[] = plotData.cast_types || [];
+      const bathyX: number[] = plotData.bathy_dist || [];
+      const bathyY: number[] = plotData.bathy_depth || [];
+      if (addBathy && plotData.used_mask && bathyX.length > 1) {
+        const yMax = Number(plotData.depth_max);
+        if (bathyStyle === 'outline') {
+          traces.push({
+            x: bathyX,
+            y: bathyY,
+            mode: 'lines',
+            line: { color: '#111111', width: 1.8 },
+            hoverinfo: 'skip',
+            showlegend: false,
+            name: 'Bathymetry',
+          });
+        } else {
+          traces.push({
+            x: [...bathyX, bathyX[bathyX.length - 1], bathyX[0]],
+            y: [...bathyY, yMax, yMax],
+            type: 'scatter',
+            mode: 'lines',
+            fill: 'toself',
+            fillcolor: 'rgba(128,128,128,0.92)',
+            line: { color: '#111111', width: 1.2 },
+            hoverinfo: 'skip',
+            showlegend: false,
+            name: 'Bathymetry',
+          });
+        }
+      }
+      if (xs.length) {
+        traces.push({
+          x: xs,
+          y: xs.map(() => 0),
+          mode: 'markers',
+          marker: {
+            symbol: xs.map((_, i) => (types[i] === 'station' ? 'hexagon' : 'triangle-down')),
+            size: 10,
+            color: '#000000',
+            line: { width: 0 },
+          },
+          cliponaxis: false,
+          hoverinfo: 'skip',
+          showlegend: false,
+        });
+      }
+      return traces;
+    }
+
+    if (plotData.plot_type === 'timeseries') {
+      const nLevels = Math.max(2, Number(numContours) || 15);
+      const zmin = plotData.vmin;
+      const zmax = plotData.vmax;
+      const hasRange = zmin != null && zmax != null && Number(zmax) > Number(zmin);
+      const traces: any[] = [{
+        z: plotData.z_primary,
+        x: plotData.x_time,
+        y: plotData.y_depth,
+        type: 'contour',
+        colorscale: plotData.colorscale || 'Viridis',
+        zmin: plotData.vmin ?? undefined,
+        zmax: plotData.vmax ?? undefined,
+        ncontours: nLevels,
+        autocontour: !hasRange,
+        contours: hasRange
+          ? {
+              coloring: 'fill',
+              showlines: false,
+              start: Number(zmin),
+              end: Number(zmax),
+              size: (Number(zmax) - Number(zmin)) / nLevels,
+            }
+          : { coloring: 'fill', showlines: false },
+        colorbar: {
+          title: {
+            text: colorbarLabel || `${plotData.primary_var} (${plotData.units_primary})`,
+            font: { color: '#143028', size: fs },
+            side: 'right',
+          },
+          tickfont: { color: '#143028', size: fs },
+          titlefont: { color: '#143028', size: fs },
+          len: 0.8,
+          thickness: 16,
+          outlinewidth: 0,
+          x: 1.02,
+          xpad: 12,
+        },
+      }];
+      if (plotData.z_secondary && secondaryVar !== 'None') {
+        const overlayStroke = overlayColor === 'white' ? '#ffffff' : '#000000';
+        traces.push({
+          z: plotData.z_secondary,
+          x: plotData.x_time,
+          y: plotData.y_depth,
+          type: 'contour',
+          name: plotData.secondary_var || secondaryVar,
+          showscale: false,
+          hoverinfo: 'skip',
+          autocontour: true,
+          ncontours: Number(numDensity) || 5,
+          colorscale: [[0, overlayStroke], [1, overlayStroke]],
+          contours: {
+            coloring: 'lines',
+            showlabels: overlayLabels,
+            labelfont: { color: overlayStroke, size: fs },
+          },
+          line: { color: overlayStroke, width: 1.6 },
+        });
+      }
+      const xs: string[] = plotData.x_time || [];
       const types: string[] = plotData.cast_types || [];
       if (xs.length) {
         traces.push({
@@ -533,6 +671,24 @@ export default function PlotWidget({
       ];
     }
 
+    if (plotData.plot_type === 'history') {
+      return (plotData.series || []).map((s: any) => ({
+        x: s.times,
+        y: (s.times || []).map(() => s.name),
+        mode: 'markers',
+        name: s.name,
+        showlegend: false,
+        marker: {
+          symbol: s.kind === 'unassigned' ? 'triangle-down' : 'hexagon',
+          size: 12,
+          color: s.kind === 'unassigned'
+            ? (plotData.unassigned_color || UNASSIGNED_COLOR)
+            : (plotData.station_color || STATION_COLOR),
+          line: { color: '#143028', width: 1 },
+        },
+      }));
+    }
+
     if (plotData.plot_type === 'distribution') {
       return (plotData.panels || []).map((p: any, i: number) => ({
         x: p.values,
@@ -581,14 +737,19 @@ export default function PlotWidget({
       const xs: number[] = plotData.x_dist || [];
       const types: string[] = plotData.cast_types || [];
       const names: string[] = plotData.stations || [];
-      const lastX = xs.length ? xs[xs.length - 1] : 1;
+      const lastCast = xs.length ? Number(xs[xs.length - 1]) : 1;
+      const bathyX: number[] = plotData.bathy_dist || [];
+      const lastBathy = addBathy && bathyX.length ? Number(bathyX[bathyX.length - 1]) : lastCast;
+      const lastX = Math.max(lastCast || 1, Number.isFinite(lastBathy) ? lastBathy : 0, 1);
       const hasStationLabels = types.some((t, i) => t === 'station' && stationTopLabel(names[i]));
+      const heading = title || plotData.title;
       return {
         ...base,
         margin: {
           ...base.margin,
-          t: title ? (hasStationLabels ? 88 : 48) : (hasStationLabels ? 56 : 40),
+          t: heading ? (hasStationLabels ? 96 : 64) : (hasStationLabels ? 56 : 40),
         },
+        title: heading ? { text: heading, font: { size: fs + 3 } } : undefined,
         xaxis: {
           ...axis,
           title: axisTitle(xlabel || 'Distance along transect (km)'),
@@ -627,6 +788,42 @@ export default function PlotWidget({
             font: { size: fs, color: '#143028' },
           }];
         }),
+      };
+    }
+    if (plotData?.plot_type === 'timeseries') {
+      const xs: string[] = plotData.x_time || [];
+      const heading = title || plotData.title;
+      return {
+        ...base,
+        margin: {
+          ...base.margin,
+          t: heading ? 64 : 40,
+          r: 96,
+        },
+        title: heading ? { text: heading, font: { size: fs + 3 } } : undefined,
+        xaxis: {
+          ...axis,
+          type: 'date',
+          title: axisTitle(xlabel || ''),
+        },
+        yaxis: {
+          ...axis,
+          title: axisTitle(ylabel || 'Depth (m)'),
+          autorange: depthRange ? false : 'reversed',
+          range: depthRange,
+        },
+        shapes: xs.map((d) => ({
+          type: 'line',
+          x0: d,
+          x1: d,
+          xref: 'x',
+          y0: 0,
+          y1: 1,
+          yref: 'paper',
+          layer: 'above',
+          line: { color: 'rgba(0,0,0,0.85)', width: 1 },
+        })),
+        showlegend: false,
       };
     }
     if (plotData?.plot_type === 'overview' || plotData?.plot_type === 'profile' || plotData?.plot_type === 'seasonal') {
@@ -707,6 +904,28 @@ export default function PlotWidget({
         legend: legendFont,
         xaxis: { ...axis, title: axisTitle(xlabel || 'Date') },
         yaxis: { ...axis, title: axisTitle(ylabel || '# of casts'), autorange: true },
+      };
+    }
+    if (plotData?.plot_type === 'history') {
+      const labels = (plotData.series || []).map((s: any) => s.name);
+      const heading = title || `Total # of casts: ${plotData.n_casts ?? 0}`;
+      return {
+        ...base,
+        margin: { ...base.margin, t: 64, l: 120 },
+        title: { text: heading, font: { size: fs + 3 } },
+        showlegend: false,
+        xaxis: {
+          ...axis,
+          type: 'date',
+          title: axisTitle(xlabel || ''),
+        },
+        yaxis: {
+          ...axis,
+          title: axisTitle(ylabel || ''),
+          type: 'category',
+          categoryorder: 'array',
+          categoryarray: labels,
+        },
       };
     }
     if (plotData?.plot_type === 'distribution') {
@@ -850,6 +1069,40 @@ export default function PlotWidget({
               Labels
             </label>
           )}
+          {show.bathymetry && (
+            <label className="check" title={plotData?.used_mask ? (plotData.bathy_name || 'Bathymetry') : 'No bathymetry raster covers this transect'}>
+              <input
+                type="checkbox"
+                checked={addBathy}
+                onChange={(e) => setAddBathy(e.target.checked)}
+                disabled={!plotData?.used_mask}
+              />
+              Add bathymetry
+            </label>
+          )}
+          {show.bathymetry && addBathy && plotData?.used_mask && (
+            <div className="heat-toggle overlay-color">
+              <button type="button" className={bathyStyle === 'filled' ? 'on' : ''} onClick={() => setBathyStyle('filled')}>
+                Filled
+              </button>
+              <button type="button" className={bathyStyle === 'outline' ? 'on' : ''} onClick={() => setBathyStyle('outline')}>
+                Outline
+              </button>
+            </div>
+          )}
+          {show.station && (
+            <select
+              className="select"
+              value={timeseriesStation}
+              onChange={(e) => setTsStation(e.target.value)}
+              disabled={!selectedStations.length}
+            >
+              {!selectedStations.length && <option value="">Select a station</option>}
+              {selectedStations.map((id, i) => (
+                <option key={id} value={id}>{selectedLabels[i] || id}</option>
+              ))}
+            </select>
+          )}
           {show.date && (
             <select className="select" value={effectiveDate} onChange={(e) => setSelectedDate(e.target.value)}>
               <option value="All">All dates</option>
@@ -898,7 +1151,7 @@ export default function PlotWidget({
               } as CSSProperties}
             >
               <Plot
-                key={`plot-${plotRev}-${plotData.plot_type}-${overlayColor}-${overlayLabels}-${numDensity}-${numContours}`}
+                key={`plot-${plotRev}-${plotData.plot_type}-${overlayColor}-${overlayLabels}-${numDensity}-${numContours}-${addBathy}-${bathyStyle}`}
                 data={generatePlotlyTraces()}
                 layout={layoutWithAttribution()}
                 config={{ responsive: true, displayModeBar: true }}
@@ -938,10 +1191,10 @@ export default function PlotWidget({
             </label>
           )}
           {show.contours && !plotType.includes('Pixel') && (
-            <label>Color levels<input className="input" value={numContours} onChange={(e) => setNumContours(e.target.value)} /></label>
+            <label>Number of colors<input className="input" value={numContours} onChange={(e) => setNumContours(e.target.value)} /></label>
           )}
           {show.contours && secondaryVar !== 'None' && (
-            <label>Overlay contours<input className="input" value={numDensity} onChange={(e) => setNumDensity(e.target.value)} /></label>
+            <label>Number of lines<input className="input" value={numDensity} onChange={(e) => setNumDensity(e.target.value)} /></label>
           )}
           {show.std && <label>Std-dev band<input className="input" value={numStd} onChange={(e) => setNumStd(e.target.value)} /></label>}
           {show.marker && <label>Marker size<input className="input" value={markerSize} onChange={(e) => setMarkerSize(e.target.value)} /></label>}
@@ -950,9 +1203,9 @@ export default function PlotWidget({
           <label>Figure height<input className="input" value={figHeight} onChange={(e) => setFigHeight(e.target.value)} /></label>
           <label>DPI
             <select className="select" value={dpi} onChange={(e) => setDpi(e.target.value)}>
-              <option value="150">150</option>
               <option value="300">300</option>
               <option value="600">600</option>
+              <option value="1000">1000</option>
             </select>
           </label>
           <label>File name<input className="input" value={fileName} onChange={(e) => setFileName(e.target.value)} placeholder={title.trim() || 'cf-plot'} /></label>

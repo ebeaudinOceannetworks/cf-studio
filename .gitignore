@@ -1,6 +1,11 @@
 .cursorignore
 .DS_Store
 data_folder.txt
+bathymetry_folder.txt
 .venv
 __pycache__/
 *.pyc
+*.tif
+*.tiff
+*.joblib
+bathy_cache/

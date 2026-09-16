@@ -300,6 +300,36 @@ def match_casts(ds, selected_ids, date_filter="All"):
     return matching
 
 
+def casts_by_time(ds, cast_ids, var=None):
+    rows = []
+    for c in cast_ids:
+        t = pd.to_datetime(as_scalar(ds.sel(cast=c).time.values), errors="coerce")
+        if pd.isna(t):
+            continue
+        if var is not None and var in ds:
+            vals = np.ravel(ds.sel(cast=c)[var].values)
+            if not np.any(np.isfinite(vals)):
+                continue
+        rows.append((t, c))
+    rows.sort(key=lambda item: item[0])
+    return [c for _, c in rows]
+
+
+def unique_station_labels(ds, cast_ids):
+    names = []
+    seen = set()
+    for c in cast_ids:
+        cast_ds = ds.sel(cast=c)
+        if not is_station_cast(cast_ds):
+            continue
+        name = as_str(cast_ds.station_name.values)
+        if name in seen:
+            continue
+        seen.add(name)
+        names.append(name)
+    return names
+
+
 def resolve_transect_date(ds, selected_ids, var, date_filter):
     if date_filter != "All":
         return date_filter
@@ -502,44 +532,214 @@ def cor2xr(cor_file):
     return xr.concat(ds_list, dim="cast", data_vars="all", join="outer")
 
 
+def parse_cor(cor_file):
+    cast = cor2xr(cor_file)
+    o2_calc = compute_o2_mL_L(cast)
+    if o2_calc is not None:
+        cast["Dissolved Oxygen"] = o2_calc
+    _, index = np.unique(cast["depth"].values, return_index=True)
+    return cast.isel(depth=index).sortby("depth")
+
+
 def concatenate_casts(cor_files):
     ds_list = []
-    print(f"Scanning {len(cor_files)} files...")
-
+    print(f"Loading {len(cor_files)} selected file(s)...")
     for i, cor_file in enumerate(cor_files):
         try:
-            cast = cor2xr(cor_file)
-            o2_calc = compute_o2_mL_L(cast)
-            if o2_calc is not None:
-                cast["Dissolved Oxygen"] = o2_calc
-
-            _, index = np.unique(cast["depth"].values, return_index=True)
-            cast = cast.isel(depth=index).sortby("depth")
-            ds_list.append(cast)
+            ds_list.append(parse_cor(cor_file))
         except Exception as file_err:
             print(
                 f"Skipped unparseable file [{i + 1}/{len(cor_files)}] "
                 f"{os.path.basename(cor_file)}: {file_err}"
             )
             continue
-
     if not ds_list:
-        raise ValueError("No valid .cor files could be loaded from the folder.")
+        raise ValueError("No valid .cor files could be loaded.")
+    if len(ds_list) == 1:
+        return ds_list[0]
+    return xr.concat(ds_list, dim="cast", join="outer").sortby("depth")
 
-    ds_all = xr.concat(ds_list, dim="cast", join="outer").sortby("depth")
-    print(f"Successfully concatenated {ds_all.cast.size} total casts from {len(ds_list)} files.")
-    return ds_all
+
+def _parse_data_items(line_str):
+    items = [i.strip() for i in line_str.split(",")] if "," in line_str else line_str.split()
+    row = []
+    for item in items:
+        try:
+            row.append(float(item))
+        except ValueError:
+            row.append(item)
+    return row
 
 
-def load_folder(path_dir):
-    if not os.path.exists(path_dir):
-        raise ValueError(f"Directory path does not exist: {path_dir}")
+def _row_time_lat_lon(columns, row, lat_val, lon_val):
+    start_time = None
+    if not columns or not row:
+        return lat_val, lon_val, start_time
+    for name, val in zip(columns, row):
+        low = str(name).lower()
+        if "time" in low:
+            ts = pd.to_datetime(val, format="%Y%m%dT%H%M%S.%fZ", errors="coerce", utc=True)
+            if pd.notna(ts):
+                start_time = ts
+        elif "lat" in low:
+            try:
+                parsed = float(val)
+                if parsed == parsed:
+                    lat_val = parsed
+            except (TypeError, ValueError):
+                pass
+        elif "lon" in low or "long" in low:
+            try:
+                parsed = float(val)
+                if parsed == parsed:
+                    lon_val = parsed
+            except (TypeError, ValueError):
+                pass
+    return lat_val, lon_val, start_time
 
-    cor_files = [
+
+def index_cor_file(cor_file):
+    base_name = os.path.basename(cor_file).replace(".cor", "").replace(".COR", "")
+    current_meta = {
+        "station_name": base_name,
+        "cast_name": base_name,
+        "cast_type": "unassigned",
+        "citation": "",
+        "lat": np.nan,
+        "lon": np.nan,
+    }
+    columns = []
+    entries = []
+    inside_data_block = False
+    first_row = None
+    cast_counter = 0
+
+    with open(cor_file, "r", encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            line_str = line.strip()
+            if not line_str:
+                continue
+            if line_str.startswith("Station name:"):
+                st_val = line_str.split(":", 1)[1].strip()
+                if st_val:
+                    current_meta["station_name"] = st_val
+                    current_meta["cast_type"] = "station" if st_val.startswith("CF") else "unassigned"
+            elif line_str.startswith("Cast name:"):
+                c_val = line_str.split(":", 1)[1].strip()
+                if c_val:
+                    current_meta["cast_name"] = c_val
+            elif line_str.startswith("Citation:"):
+                current_meta["citation"] = line_str.split(":", 1)[1].strip()
+            elif line_str.startswith("LatitudeCastStart:"):
+                try:
+                    current_meta["lat"] = float(line_str.split(":", 1)[1].split(";")[0].strip())
+                except Exception:
+                    pass
+            elif line_str.startswith("LongitudeCastStart:"):
+                try:
+                    current_meta["lon"] = float(line_str.split(":", 1)[1].split(";")[0].strip())
+                except Exception:
+                    pass
+            elif line_str.startswith("Column"):
+                raw_cols = line_str.split(",")
+                parsed_cols = []
+                for c in raw_cols:
+                    col_name = c.split(":")[-1].split(";")[0].split("(")[0].strip()
+                    parsed_cols.append(col_name)
+                if parsed_cols:
+                    columns = parsed_cols
+            elif "------ BEGIN DATA ------" in line_str:
+                inside_data_block = True
+                first_row = None
+            elif "------ END DATA ------" in line_str:
+                inside_data_block = False
+                cast_counter += 1
+                lat_val, lon_val, start_time = _row_time_lat_lon(
+                    columns, first_row, current_meta["lat"], current_meta["lon"]
+                )
+                community = extract_community_from_citation(current_meta["citation"])
+                day = "Unknown"
+                if start_time is not None:
+                    local = local_timestamp(start_time, lon=lon_val, lat=lat_val, community=community)
+                    if not pd.isna(local):
+                        day = str(local.date())
+                entries.append({
+                    "path": cor_file,
+                    "cast_id": f"{base_name}_d{cast_counter}",
+                    "station_name": str(current_meta["station_name"]),
+                    "cast_name": str(current_meta["cast_name"]),
+                    "cast_type": str(current_meta["cast_type"]),
+                    "community": str(community),
+                    "lat": lat_val,
+                    "lon": lon_val,
+                    "date": day,
+                    "columns": list(columns),
+                })
+            elif inside_data_block and first_row is None:
+                first_row = _parse_data_items(line_str)
+
+    if not entries:
+        raise ValueError(f"No data blocks in {base_name}")
+    return entries
+
+
+INDEX_SKIP_COLS = {"lat", "lon", "long", "longitude", "latitude", "depth", "time", "datetime"}
+
+
+def list_cor_files(path_dir):
+    return sorted(
         path
         for path in glob.glob(os.path.join(path_dir, "**", "*.cor"), recursive=True)
         if os.path.basename(path).endswith(".cor")
-    ]
+    )
+
+
+def index_folder(path_dir):
+    if not os.path.exists(path_dir):
+        raise ValueError(f"Directory path does not exist: {path_dir}")
+    cor_files = list_cor_files(path_dir)
     if not cor_files:
         raise ValueError(f"No .cor files found in {path_dir}")
-    return concatenate_casts(cor_files), len(cor_files)
+
+    catalog = []
+    variables = set()
+    print(f"Indexing {len(cor_files)} files...")
+    for i, cor_file in enumerate(cor_files):
+        try:
+            for entry in index_cor_file(cor_file):
+                catalog.append(entry)
+                for col in entry.get("columns") or []:
+                    if col and col.lower() not in INDEX_SKIP_COLS:
+                        variables.add(col)
+        except Exception as file_err:
+            print(
+                f"Skipped unreadable file [{i + 1}/{len(cor_files)}] "
+                f"{os.path.basename(cor_file)}: {file_err}"
+            )
+            continue
+    if not catalog:
+        raise ValueError("No valid .cor files could be indexed from the folder.")
+    if {"Oxygen Saturation", "Temperature", "Practical Salinity", "Pressure"} <= variables:
+        variables.add("Dissolved Oxygen")
+    print(f"Indexed {len(catalog)} casts in {len({e['path'] for e in catalog})} files.")
+    return catalog, sorted(variables)
+
+
+def files_for_selection(catalog, selected_ids):
+    if not selected_ids:
+        return []
+    wanted = set(selected_ids)
+    paths = []
+    seen = set()
+    for entry in catalog:
+        if entry["station_name"] in wanted or entry["cast_id"] in wanted:
+            path = entry["path"]
+            if path not in seen:
+                seen.add(path)
+                paths.append(path)
+    return paths
+
+
+def load_folder(path_dir):
+    catalog, _variables = index_folder(path_dir)
+    return catalog, len({e["path"] for e in catalog})

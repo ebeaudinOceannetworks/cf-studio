@@ -12,16 +12,20 @@ from data import (
     as_scalar,
     as_str,
     cast_date,
+    casts_by_time,
     deepest_cast_per_station,
     get_units,
+    is_station_cast,
     match_casts,
     resolve_clim,
+    unique_station_labels,
     valid_depth_extent,
     resolve_cmap,
     resolve_transect_date,
     transect_distances,
     sampling_day_counts,
 )
+import transect_dijkstra as bathy
 
 
 def station_top_label(name: str) -> str:
@@ -278,6 +282,8 @@ def transect_plot(
     vmax=None,
     colormap=None,
     figsize=(12, 4),
+    add_bathymetry=True,
+    bathymetry_style="filled",
 ):
     fig, ax = _new_axes(figsize, ax)
     date_filter = resolve_transect_date(ds, selected_ids, var, date_filter)
@@ -324,7 +330,12 @@ def transect_plot(
 
     lats = np.ravel(data_transect.lat.values)
     lons = np.ravel(data_transect.lon.values)
-    cast_dist = transect_distances(lats, lons)
+    stations = list(zip(lats.tolist(), lons.tolist()))
+    bathy_info = bathy.draw_transect(stations)
+    if bathy_info.get("used_mask") and bathy_info.get("station_distances"):
+        cast_dist = np.asarray(bathy_info["station_distances"], dtype=float)
+    else:
+        cast_dist = transect_distances(lats, lons)
     cmap = resolve_cmap(colormap, var)
     clim_min, clim_max = resolve_clim(var, vmin, vmax)
     val_min = clim_min if clim_min is not None else float(np.nanmin(Z))
@@ -392,6 +403,15 @@ def transect_plot(
             )
 
     lo, max_d = valid_depth_extent(ds, deepest_casts, var, depth_min, depth_max)
+    if add_bathymetry and bathy_info.get("used_mask"):
+        y_bottom = bathy.overlay_bathymetry(
+            ax,
+            bathy_info.get("bathy_dist"),
+            bathy_info.get("bathy_depth"),
+            style=bathymetry_style or "filled",
+        )
+        if y_bottom is not None:
+            max_d = max(float(max_d), float(y_bottom))
     ax.set_xlim(0, cast_dist[-1] if len(cast_dist) else 1)
     ax.set_ylim(max_d, lo)
     ax.set_xlabel("Distance along transect (km)")
@@ -399,6 +419,195 @@ def transect_plot(
     ax.set_title(f"Transect: {date_filter} ({var})")
     cbar = fig.colorbar(mesh, ax=ax)
     cbar.set_label(f"{var} ({get_units(var)})")
+    return fig
+
+
+def timeseries_station_plot(
+    ds,
+    selected_ids,
+    var="Temperature",
+    ax=None,
+    date_filter="All",
+    num_contour_lines=15,
+    num_density_lines=5,
+    secondary_variable=None,
+    overlay_color="black",
+    overlay_labels=True,
+    depth_min=0,
+    depth_max=None,
+    vmin=None,
+    vmax=None,
+    colormap=None,
+    figsize=(8, 4),
+):
+    fig, ax = _new_axes(figsize, ax)
+    station_ids = list(selected_ids[-1:]) if selected_ids else []
+    selected_casts = match_casts(ds, station_ids, "All")
+    ordered = casts_by_time(ds, selected_casts, var)
+    if len(ordered) < 2:
+        ax.text(
+            0.5,
+            0.5,
+            "Timeseries needs at least 2 casts at the selected station.",
+            ha="center",
+            va="center",
+            fontsize=11,
+            color="#b91c1c",
+        )
+        return fig
+
+    data_ts = ds.sel(cast=ordered).transpose("depth", "cast")
+    Z = data_ts[var].values
+    if np.all(np.isnan(Z)):
+        ax.text(
+            0.5,
+            0.5,
+            f"Variable '{var}' contains only NaN values for the selected casts.",
+            ha="center",
+            va="center",
+            fontsize=11,
+            color="#b91c1c",
+        )
+        return fig
+
+    times = pd.to_datetime([as_scalar(t) for t in data_ts.time.values])
+    depths = data_ts.depth.values
+    cmap = resolve_cmap(colormap, var)
+    clim_min, clim_max = resolve_clim(var, vmin, vmax)
+    val_min = clim_min if clim_min is not None else float(np.nanmin(Z))
+    val_max = clim_max if clim_max is not None else float(np.nanmax(Z))
+    if val_min == val_max:
+        val_min -= 0.1
+        val_max += 0.1
+    n_levels = max(2, int(num_contour_lines or 15))
+    levels = np.linspace(val_min, val_max, n_levels + 1)
+    mesh = ax.contourf(times, depths, Z, cmap=cmap, levels=levels, extend="both")
+
+    overlay_var = secondary_variable if secondary_variable and secondary_variable != "None" else None
+    if (
+        overlay_var
+        and overlay_var in data_ts
+        and num_density_lines
+        and num_density_lines > 0
+        and not np.all(np.isnan(data_ts[overlay_var].values))
+    ):
+        try:
+            line_color = "w" if str(overlay_color).lower() == "white" else "k"
+            cs = ax.contour(
+                times,
+                depths,
+                data_ts[overlay_var].values,
+                colors=line_color,
+                linewidths=1,
+                levels=int(num_density_lines),
+            )
+            if overlay_labels:
+                ax.clabel(cs, inline=True, fontsize=8, fmt="%g", colors=line_color)
+        except Exception:
+            pass
+
+    for i, t in enumerate(times):
+        st_type = as_str(data_ts.cast_type[i].values) if "cast_type" in data_ts else "station"
+        marker = "H" if st_type == "station" else "v"
+        ax.axvline(t, lw=0.5, c="k", zorder=101)
+        ax.scatter(t, 0, marker=marker, s=30, c="k", clip_on=False, zorder=101)
+
+    lo, max_d = valid_depth_extent(ds, ordered, var, depth_min, depth_max)
+    ax.set_ylim(max_d, lo)
+    names = unique_station_labels(ds, ordered)
+    title = names[0] if len(names) == 1 else (", ".join(names) if names else "Selected casts")
+    ax.set_xlabel("")
+    ax.set_ylabel("Depth (m)")
+    ax.set_title(title)
+    cbar = fig.colorbar(mesh, ax=ax)
+    cbar.set_label(f"{var} ({get_units(var)})")
+    return fig
+
+
+def sampling_history_plot(ds, selected_ids=None, date_filter="All", figsize=(8, 6)):
+    import matplotlib.dates as mdates
+
+    fig, ax = _new_axes(figsize)
+    ids = selected_ids or []
+    if ids:
+        selected = match_casts(ds, ids, date_filter)
+        ds_sub = ds.sel(cast=selected) if selected else ds.isel(cast=slice(0, 0))
+    else:
+        ds_sub = ds
+
+    if ds_sub.cast.size == 0:
+        ax.text(0.5, 0.5, "No casts available for sampling history.", ha="center", va="center")
+        return fig
+
+    station_names = []
+    seen = set()
+    for c in ds_sub.cast.values:
+        cast_ds = ds_sub.sel(cast=c)
+        if not is_station_cast(cast_ds):
+            continue
+        name = as_str(cast_ds.station_name.values)
+        if name in seen:
+            continue
+        seen.add(name)
+        station_names.append(name)
+    station_names = sorted(station_names)
+
+    for i, station_name in enumerate(station_names):
+        times = []
+        for c in ds_sub.cast.values:
+            cast_ds = ds_sub.sel(cast=c)
+            if as_str(cast_ds.station_name.values) != station_name:
+                continue
+            if not is_station_cast(cast_ds):
+                continue
+            t = pd.to_datetime(as_scalar(cast_ds.time.values), errors="coerce")
+            if pd.notna(t):
+                times.append(t)
+        if times:
+            ax.scatter(
+                times,
+                np.full(len(times), i),
+                marker="H",
+                edgecolor="k",
+                facecolor=STATION_COLOR,
+                s=80,
+                zorder=101,
+            )
+
+    unassigned_times = []
+    for c in ds_sub.cast.values:
+        cast_ds = ds_sub.sel(cast=c)
+        if is_station_cast(cast_ds):
+            continue
+        t = pd.to_datetime(as_scalar(cast_ds.time.values), errors="coerce")
+        if pd.notna(t):
+            unassigned_times.append(t)
+
+    labels = list(station_names)
+    if unassigned_times:
+        y_unassigned = len(station_names)
+        ax.scatter(
+            unassigned_times,
+            np.full(len(unassigned_times), y_unassigned),
+            marker="v",
+            edgecolor="k",
+            facecolor=UNASSIGNED_COLOR,
+            s=80,
+            zorder=101,
+        )
+        labels.append("Unassigned")
+
+    if not labels:
+        ax.text(0.5, 0.5, "No casts available for sampling history.", ha="center", va="center")
+        return fig
+
+    ax.set_yticks(np.arange(len(labels)))
+    ax.set_yticklabels(labels)
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%b\n%Y"))
+    ax.xaxis.set_major_locator(mdates.MonthLocator(interval=3))
+    ax.set_title(f"Total # of casts: {int(ds_sub.cast.size)}")
+    ax.grid(alpha=0.3)
+    ax.set_axisbelow(True)
     return fig
 
 
@@ -635,6 +844,8 @@ def render_plot(ds, plot_type, selected_ids, variable, style):
             vmax=vmax,
             colormap=style.get("colormap"),
             figsize=figsize,
+            add_bathymetry=style.get("add_bathymetry", True),
+            bathymetry_style=style.get("bathymetry_style") or "filled",
         )
         if style.get("colorbar_label") and fig.axes:
             for ax in fig.axes:
@@ -645,6 +856,29 @@ def render_plot(ds, plot_type, selected_ids, variable, style):
                     fig.axes[-1].set_ylabel(style["colorbar_label"])
                 except Exception:
                     pass
+    elif "Timeseries" in plot_type or "Time Series" in plot_type:
+        fig = timeseries_station_plot(
+            ds,
+            selected_ids,
+            var=variable,
+            date_filter=date_filter,
+            num_contour_lines=style.get("num_contour_lines", 15),
+            num_density_lines=style.get("num_density_lines", 5),
+            secondary_variable=style.get("secondary_variable"),
+            overlay_color=style.get("overlay_color", "black"),
+            overlay_labels=style.get("overlay_labels", True),
+            depth_min=depth_min if depth_min is not None else 0,
+            depth_max=depth_max,
+            vmin=vmin,
+            vmax=vmax,
+            colormap=style.get("colormap"),
+            figsize=figsize,
+        )
+        if style.get("colorbar_label") and fig.axes and len(fig.axes) > 1:
+            try:
+                fig.axes[-1].set_ylabel(style["colorbar_label"])
+            except Exception:
+                pass
     elif "Profile" in plot_type and "Season" not in plot_type:
         fig = depth_profile_plot(
             ds,
@@ -682,6 +916,8 @@ def render_plot(ds, plot_type, selected_ids, variable, style):
             line_width=style.get("line_width", 2.0),
             figsize=figsize,
         )
+    elif "History" in plot_type:
+        fig = sampling_history_plot(ds, selected_ids, date_filter=date_filter, figsize=figsize)
     elif "Sampling" in plot_type:
         fig = sampling_days_plot(ds, selected_ids, date_filter=date_filter, figsize=figsize)
     elif "Distribution" in plot_type:

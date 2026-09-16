@@ -93,10 +93,7 @@ export default function DateHeatmap({ stations, dateFilter, onSelect, mode, onMo
   return (
     <div className="heatmap">
       <div className="row-between" style={{ marginBottom: 8 }}>
-        <span>
-          <strong>Sampling calendar</strong>
-          <span className="muted" style={{ fontWeight: 400, marginLeft: 8 }}>local days</span>
-        </span>
+        <strong>Sampling calendar</strong>
         <button type="button" className="btn btn-ghost" style={{ padding: '2px 8px', fontSize: '0.75rem' }} onClick={() => onSelect('All')}>
           All dates
         </button>

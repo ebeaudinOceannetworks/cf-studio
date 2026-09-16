@@ -20,6 +20,7 @@ export default function App() {
   const [showStations, setShowStations] = useState<boolean>(true);
   const [showUnassigned, setShowUnassigned] = useState<boolean>(true);
   const [showTimeline, setShowTimeline] = useState<boolean>(false);
+  const [showBathyCoverage, setShowBathyCoverage] = useState<boolean>(false);
   const [mode, setMode] = useState<'explore' | 'studio'>('explore');
 
   const communityStations = useMemo(() => {
@@ -236,11 +237,11 @@ export default function App() {
               Studio
             </button>
           </div>
-          <span className="muted">
-            {mode === 'explore'
-              ? (dateFilter === 'All' ? 'All dates on the map' : `Map date: ${dateFilter}`)
-              : 'Working on one figure'}
-          </span>
+          {mode === 'explore' && (
+            <span className="muted">
+              {dateFilter === 'All' ? 'All dates on the map' : `Map date: ${dateFilter}`}
+            </span>
+          )}
         </div>
 
         <div className="map-pane">
@@ -252,10 +253,15 @@ export default function App() {
             showStations={showStations}
             showUnassigned={showUnassigned}
             showTimeline={showTimeline}
+            showBathyCoverage={showBathyCoverage}
+            bathyCoverages={data?.bathy_coverages || []}
+            bathySkipped={data?.bathy_skipped || []}
+            maxBathyMb={data?.max_bathy_mb || 100}
             onDrawTransect={setDrawTransect}
             onShowStations={setShowStations}
             onShowUnassigned={setShowUnassigned}
             onShowTimeline={setShowTimeline}
+            onShowBathyCoverage={setShowBathyCoverage}
             focus={mapFocus}
             active={mode === 'explore'}
             onStationSelect={handleStationClick}
@@ -270,6 +276,7 @@ export default function App() {
               availablePlotTypes={data.plot_types || []}
               availableDates={selectedDates}
               selectedStations={selectedStations}
+              selectedLabels={selectedLabels}
               globalDate={dateFilter}
               visible={mode === 'studio'}
             />

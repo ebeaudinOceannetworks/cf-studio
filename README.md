@@ -23,6 +23,8 @@ The script creates `.venv` if needed, installs Python deps, builds `frontend/`, 
 4. **Studio** is an interactive Plotly figure (hover, zoom, pan). **Customize** edits title, size, and style on that same figure.
 5. **Save figure** downloads the Plotly figure as you see it (PNG, SVG, or PDF).
 
+
+
 ## Develop
 
 ```bash
@@ -40,3 +42,18 @@ python -m uvicorn api:app --host 127.0.0.1 --port 8000
 ```
 
 Vite (`http://127.0.0.1:5173`) proxies `/api` to port 8000.
+
+## Get Bathymetry Data
+
+West coast: in the terminal/command prompt, run this command, example for Prince Rupert Port Authority:
+
+`gdal_translate \`
+
+  `-projwin -130.541267 54.443444 -130.182607 54.148639 \`
+
+  `-projwin_srs EPSG:4326 \`
+
+  `'OpenFileGDB:"/vsizip//vsicurl/https://ftp.maps.canada.ca/pub/nrcan_rncan/Topography_Topographie/canada_west_coast_DEM-MNA_cote_ouest_canada/canada_west_coast_DEM_original.gdb.zip":WEST_COAST_DEM' \`
+
+  `prince_rupert_dem.tif`
+

@@ -428,10 +428,11 @@ def plot_transect_payload(req: PlotStyle, attribution_text: str):
         z_secondary = [row for row, keep in zip(z_secondary, mask) if keep]
 
     clim_min, clim_max = data.resolve_clim(req.variable, req.vmin, req.vmax)
-    bathy_depth = bathy_info.get("bathy_depth") or []
-    finite_bathy = [v for v in bathy_depth if v is not None]
-    if finite_bathy:
-        hi = max(float(hi), float(np.nanmax(finite_bathy)))
+    if req.depth_max is None:
+        bathy_depth = bathy_info.get("bathy_depth") or []
+        finite_bathy = [v for v in bathy_depth if v is not None]
+        if finite_bathy:
+            hi = max(float(hi), float(np.nanmax(finite_bathy)))
     return {
         "plot_type": "transect",
         "x_dist": cast_dist.tolist(),

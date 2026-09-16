@@ -574,7 +574,7 @@ def draw_transect(stations, tif_file: Optional[str] = None, data_folder: Optiona
     }
 
 
-def overlay_bathymetry(ax, distances, seabed, style="filled"):
+def overlay_bathymetry(ax, distances, seabed, style="filled", depth_min=None, depth_max=None):
     if distances is None or seabed is None or len(distances) < 2:
         return
     dist = np.asarray(distances, dtype=float)
@@ -583,11 +583,15 @@ def overlay_bathymetry(ax, distances, seabed, style="filled"):
     if np.count_nonzero(finite) < 2:
         return
     dist, depth = dist[finite], depth[finite]
-    y_bottom = float(np.nanmax(depth))
+    y_bottom = float(depth_max) if depth_max is not None else float(np.nanmax(depth))
+    y_top = float(depth_min) if depth_min is not None else 0.0
+    if y_bottom <= y_top:
+        y_bottom = y_top + 1.0
+    depth = np.clip(depth, y_top, y_bottom)
     if style == "outline":
-        ax.plot(dist, depth, color="k", lw=1.4, zorder=102)
+        ax.plot(dist, depth, color="k", lw=1.4, zorder=102, clip_on=True)
     else:
-        ax.fill_between(dist, depth, y_bottom, edgecolor="k", facecolor="grey", zorder=102)
+        ax.fill_between(dist, depth, y_bottom, edgecolor="k", facecolor="grey", zorder=102, clip_on=True)
     return y_bottom
 
 

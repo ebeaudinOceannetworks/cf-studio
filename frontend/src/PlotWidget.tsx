@@ -377,6 +377,7 @@ export default function PlotWidget({
         colorscale: plotData.colorscale || 'Viridis',
         zmin: plotData.vmin ?? undefined,
         zmax: plotData.vmax ?? undefined,
+        cliponaxis: true,
         ...filledContours,
         colorbar: {
           title: {
@@ -419,21 +420,31 @@ export default function PlotWidget({
       const bathyX: number[] = plotData.bathy_dist || [];
       const bathyY: number[] = plotData.bathy_depth || [];
       if (addBathy && plotData.used_mask && bathyX.length > 1) {
+        const yTop = Number(plotData.depth_min ?? 0);
         const yMax = Number(plotData.depth_max);
+        const clipY = Number.isFinite(yMax)
+          ? bathyY.map((y) => {
+              if (y == null || !Number.isFinite(Number(y))) return y;
+              const v = Number(y);
+              const lo = Number.isFinite(yTop) ? yTop : 0;
+              return Math.min(Math.max(v, lo), yMax);
+            })
+          : bathyY;
         if (bathyStyle === 'outline') {
           traces.push({
             x: bathyX,
-            y: bathyY,
+            y: clipY,
             mode: 'lines',
             line: { color: '#111111', width: 1.8 },
             hoverinfo: 'skip',
             showlegend: false,
+            cliponaxis: true,
             name: 'Bathymetry',
           });
         } else {
           traces.push({
             x: [...bathyX, bathyX[bathyX.length - 1], bathyX[0]],
-            y: [...bathyY, yMax, yMax],
+            y: [...clipY, yMax, yMax],
             type: 'scatter',
             mode: 'lines',
             fill: 'toself',
@@ -441,6 +452,7 @@ export default function PlotWidget({
             line: { color: '#111111', width: 1.2 },
             hoverinfo: 'skip',
             showlegend: false,
+            cliponaxis: true,
             name: 'Bathymetry',
           });
         }
@@ -714,7 +726,7 @@ export default function PlotWidget({
       tickfont: { size: fs, color: '#143028' },
       title: { font: { size: fs, color: '#143028' } },
     };
-    const viewKey = `${id}|${plotType}|${plotIds.join('|')}|${effectiveDate}|${activeVar}|${fs}`;
+    const viewKey = `${id}|${plotType}|${plotIds.join('|')}|${effectiveDate}|${activeVar}|${depthMin}|${depthMax}|${fs}`;
     const depthRange = (plotData?.depth_max != null)
       ? [plotData.depth_max, plotData.depth_min ?? 0]
       : undefined;

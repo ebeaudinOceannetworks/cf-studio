@@ -347,27 +347,37 @@ def transect_plot(
     n_levels = max(2, int(num_contour_lines or 15))
     levels = np.linspace(val_min, val_max, n_levels + 1)
 
+    lo, max_d = valid_depth_extent(ds, deepest_casts, var, depth_min, depth_max)
+    depth_vals = np.asarray(data_transect.depth.values, dtype=float)
+    row_mask = (depth_vals >= lo) & (depth_vals <= max_d)
+    if not np.any(row_mask):
+        row_mask = np.ones(depth_vals.shape, dtype=bool)
+    y_plot = depth_vals[row_mask]
+    z_plot = np.asarray(Z)[row_mask]
+    overlay_z = None
+    overlay_var = secondary_variable if secondary_variable and secondary_variable != "None" else None
+    if overlay_var and overlay_var in data_transect:
+        overlay_z = np.asarray(data_transect[overlay_var].values)[row_mask]
+
     if contour_type == "contourf":
-        mesh = ax.contourf(cast_dist, data_transect.depth.values, Z, cmap=cmap, levels=levels, extend="both")
+        mesh = ax.contourf(cast_dist, y_plot, z_plot, cmap=cmap, levels=levels, extend="both")
     else:
         mesh = ax.pcolormesh(
-            cast_dist, data_transect.depth.values, Z, cmap=cmap, vmin=val_min, vmax=val_max
+            cast_dist, y_plot, z_plot, cmap=cmap, vmin=val_min, vmax=val_max
         )
 
-    overlay_var = secondary_variable if secondary_variable and secondary_variable != "None" else None
     if (
-        overlay_var
-        and overlay_var in data_transect
+        overlay_z is not None
         and num_density_lines
         and num_density_lines > 0
-        and not np.all(np.isnan(data_transect[overlay_var].values))
+        and not np.all(np.isnan(overlay_z))
     ):
         try:
             line_color = "w" if str(overlay_color).lower() == "white" else "k"
             cs = ax.contour(
                 cast_dist,
-                data_transect.depth.values,
-                data_transect[overlay_var].values,
+                y_plot,
+                overlay_z,
                 colors=line_color,
                 linewidths=1,
                 levels=int(num_density_lines),
@@ -402,15 +412,16 @@ def transect_plot(
                 zorder=101,
             )
 
-    lo, max_d = valid_depth_extent(ds, deepest_casts, var, depth_min, depth_max)
     if add_bathymetry and bathy_info.get("used_mask"):
         y_bottom = bathy.overlay_bathymetry(
             ax,
             bathy_info.get("bathy_dist"),
             bathy_info.get("bathy_depth"),
             style=bathymetry_style or "filled",
+            depth_min=lo,
+            depth_max=max_d if depth_max is not None else None,
         )
-        if y_bottom is not None:
+        if y_bottom is not None and depth_max is None:
             max_d = max(float(max_d), float(y_bottom))
     ax.set_xlim(0, cast_dist[-1] if len(cast_dist) else 1)
     ax.set_ylim(max_d, lo)

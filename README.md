@@ -1,6 +1,6 @@
 # Community Fishers Plot Studio
 
-Local app for Community Fishers CTD casts: load a folder of `.cor` files, pick stations on a map, filter by local sampling day, inspect figures, and export PNG, SVG, or PDF.
+Local app for Community Fishers CTD casts: load a folder of casts in `.cor` format, and bathymetry files in `.tif` format (<100 MB each), pick stations on a map, visualize the data (transect, time series, profiles, etc), and export in PNG.
 
 ## Requirements
 
@@ -8,40 +8,20 @@ Local app for Community Fishers CTD casts: load a folder of `.cor` files, pick s
 - Node.js (npm) to build the dashboard
 
 ## Launch
+Inside the `cf-studio` folder:
 
-**Mac:** double-click `launch_mac.command` (or run it from Terminal).
+**Mac:** double-click `launch_mac.command`
 
-**Windows:** double-click `launch_windows.bat`.
+**Windows:** double-click `launch_windows.bat`
 
-The script creates `.venv` if needed, installs Python deps, builds `frontend/`, and starts the API at [http://127.0.0.1:8000](http://127.0.0.1:8000).
+## How to use
 
-## Use
-
-1. Enter a folder that contains `.cor` files and click **Load folder**. That only reads headers (station, date, location). Profiles are parsed when you select a station.
-2. **Remember path** writes that folder to `data_folder.txt` (local only; not committed) so the next start opens it again.
+1. On the open Dashboard, you will be prompted for a folder that contains the CF cast data (`.cor` format). Click **Load folder**.
+2. Click **Remember path** for the next time you use the dashboard.
 3. **Explore** is the map and sampling calendar. Click a station; Shift-click to add more.
-4. **Studio** is an interactive Plotly figure (hover, zoom, pan). **Customize** edits title, size, and style on that same figure.
-5. **Save figure** downloads the Plotly figure as you see it (PNG, SVG, or PDF).
+4. **Studio** is an interactive plotting tool. Click **Customize** to edit title, fontsize, colors, style, figure resolution, etc., on that same figure.
+5. **Save figure** downloads the figure as you see it.
 
-
-
-## Develop
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-cd frontend && npm install && npm run dev
-```
-
-In another terminal, from the repo root:
-
-```bash
-source .venv/bin/activate
-python -m uvicorn api:app --host 127.0.0.1 --port 8000
-```
-
-Vite (`http://127.0.0.1:5173`) proxies `/api` to port 8000.
 
 ## Get Bathymetry Data
 

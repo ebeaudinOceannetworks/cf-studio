@@ -24,10 +24,13 @@ Inside the `cf-studio` folder:
 
 
 ## Get Bathymetry Data
+***FILES >100 MB CANNOT BE USED***
 
-**West coast**
+A few bathymetry files are available [in this folder](https://drive.google.com/drive/folders/1Kw7KUgMWLAOtgbOxmnSKZ-FEMAGKsP01?usp=share_link).
 
-Command prompt example for Prince Rupert Port Authority:
+You can also request any **West Coast** dem products using the terminal or any of your favourite methods. For **East Coast** or sparsely surveyed areas, ask Jeff from GIS.
 
-`gdal_translate -projwin -130.541267 54.443444 -130.182607 54.148639 -projwin_srs EPSG:4326  'OpenFileGDB:"/vsizip//vsicurl/https://ftp.maps.canada.ca/pub/nrcan_rncan/Topography_Topographie/canada_west_coast_DEM-MNA_cote_ouest_canada/canada_west_coast_DEM_original.gdb.zip":WEST_COAST_DEM' prince_rupert_dem.tif`
+Command prompt example to download bathymetry for Prince Rupert Port Authority:
+
+`gdal_translate -projwin -130.541267 54.443444 -130.182607 54.148639 -projwin_srs EPSG:4326 'OpenFileGDB:"/vsizip//vsicurl/https://ftp.maps.canada.ca/pub/nrcan_rncan/Topography_Topographie/canada_west_coast_DEM-MNA_cote_ouest_canada/canada_west_coast_DEM_original.gdb.zip":WEST_COAST_DEM' prince_rupert_dem.tif`
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import MapView from './Map';
 import PlotWidget from './PlotWidget';
 import DateHeatmap from './DateHeatmap';
@@ -116,6 +116,19 @@ export default function App() {
     setSelectedStations((prev) => prev.filter((st) => st !== id));
   };
 
+  const dragFrom = useRef<number | null>(null);
+  const [dragOver, setDragOver] = useState<number | null>(null);
+
+  const reorderStations = (from: number, to: number) => {
+    setSelectedStations((prev) => {
+      if (from === to || from < 0 || to < 0 || from >= prev.length || to >= prev.length) return prev;
+      const next = [...prev];
+      const [item] = next.splice(from, 1);
+      next.splice(to, 0, item);
+      return next;
+    });
+  };
+
   const selectedLabels = selectedStations.map((id) => {
     const st = (data?.stations || []).find((s: any) => s.id === id);
     return st?.short_label || st?.label || id;
@@ -198,20 +211,48 @@ export default function App() {
         <div className="panel" style={{ marginBottom: 0 }}>
           <strong>Selected ({selectedStations.length})</strong>
           <p className="muted" style={{ margin: '6px 0' }}>
-            Click a station. Shift-click to add. The calendar date is the plot date until you change it in Studio.
+            Click a station. Shift-click to add. Drag a row to reorder.
           </p>
           <ol className="selected-list">
             {selectedLabels.map((label, i) => {
               const id = selectedStations[i];
               return (
-                <li key={id}>
+                <li
+                  key={id}
+                  draggable
+                  className={dragOver === i ? 'drag-over' : undefined}
+                  onDragStart={(e) => {
+                    dragFrom.current = i;
+                    e.dataTransfer.effectAllowed = 'move';
+                    e.dataTransfer.setData('text/plain', String(i));
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    if (dragOver !== i) setDragOver(i);
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const from = dragFrom.current ?? Number(e.dataTransfer.getData('text/plain'));
+                    reorderStations(from, i);
+                    dragFrom.current = null;
+                    setDragOver(null);
+                  }}
+                  onDragEnd={() => {
+                    dragFrom.current = null;
+                    setDragOver(null);
+                  }}
+                >
                   <span className="selected-item">
+                    <span className="drag-handle" aria-hidden="true">⋮⋮</span>
                     <span>{label}</span>
                     <button
                       type="button"
                       className="selected-remove"
                       aria-label={`Remove ${label}`}
                       title="Remove from selection"
+                      draggable={false}
+                      onMouseDown={(e) => e.stopPropagation()}
                       onClick={() => removeStation(id)}
                     >
                       ×

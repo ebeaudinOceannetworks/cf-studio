@@ -45,13 +45,26 @@ function stationTopLabel(name: string) {
   return parts[0] || '';
 }
 
-function wrapAttribution(text: string, widthChars: number) {
+let measureCtx: CanvasRenderingContext2D | null = null;
+
+function textWidthPx(text: string, fontPx: number) {
+  if (!measureCtx) {
+    measureCtx = document.createElement('canvas').getContext('2d');
+  }
+  if (!measureCtx) return text.length * fontPx * 0.52;
+  measureCtx.font = `italic ${fontPx}px "Open Sans", Verdana, Arial, sans-serif`;
+  return measureCtx.measureText(text).width;
+}
+
+function wrapAttribution(text: string, maxWidth: number, fontPx: number) {
   const words = String(text || '').split(/\s+/).filter(Boolean);
+  if (!words.length || maxWidth <= 0) return String(text || '');
+  const fits = (value: string) => textWidthPx(value, fontPx) <= maxWidth;
   const lines: string[] = [];
   let line = '';
   for (const word of words) {
     const next = line ? `${line} ${word}` : word;
-    if (next.length > widthChars && line) {
+    if (line && !fits(next)) {
       lines.push(line);
       line = word;
     } else {
@@ -59,7 +72,22 @@ function wrapAttribution(text: string, widthChars: number) {
     }
   }
   if (line) lines.push(line);
-  return lines.join('<br>');
+  const broken: string[] = [];
+  for (const row of lines) {
+    if (fits(row)) {
+      broken.push(row);
+      continue;
+    }
+    let rest = row;
+    while (rest && !fits(rest)) {
+      let cut = rest.length - 1;
+      while (cut > 1 && !fits(rest.slice(0, cut))) cut -= 1;
+      broken.push(rest.slice(0, Math.max(cut, 1)));
+      rest = rest.slice(Math.max(cut, 1));
+    }
+    if (rest) broken.push(rest);
+  }
+  return broken.join('<br>');
 }
 
 function jpegDataUrlToPdf(dataUrl: string, widthPx: number, heightPx: number, dpi: number) {
@@ -223,6 +251,7 @@ export default function PlotWidget({
     ? (timeseriesStation ? [timeseriesStation] : [])
     : selectedStations;
   const plotFrameRef = useRef<HTMLDivElement | null>(null);
+  const [plotWidthPx, setPlotWidthPx] = useState(0);
   const plotlyGd = useRef<any>(null);
   const fetchGen = useRef(0);
 
@@ -332,6 +361,8 @@ export default function PlotWidget({
       const gd = frame?.querySelector('.js-plotly-plot') as any;
       const Plotly = (window as any).Plotly;
       if (gd && Plotly?.Plots?.resize) Plotly.Plots.resize(gd);
+      const w = Math.round(frame?.clientWidth || 0);
+      if (w) setPlotWidthPx((prev) => (prev === w ? prev : w));
     };
     const t1 = window.setTimeout(resize, 40);
     const t2 = window.setTimeout(resize, 220);
@@ -563,7 +594,7 @@ export default function PlotWidget({
         x: t.x,
         y: t.y,
         mode: 'lines',
-        name: t.latest ? `Most recent (${t.date})` : t.date,
+        name: t.latest ? `Newest (${t.date})` : t.date,
         showlegend: !!t.latest,
         hoverinfo: 'name',
         line: { color, width: t.latest ? lineW : 1 },
@@ -841,6 +872,7 @@ export default function PlotWidget({
     if (plotData?.plot_type === 'overview' || plotData?.plot_type === 'profile' || plotData?.plot_type === 'seasonal') {
       return {
         ...base,
+        hoverlabel: { namelength: -1 },
         showlegend: plotData.plot_type !== 'overview',
         legend: plotData.plot_type === 'profile'
           ? { ...legendFont, x: 0.98, y: 0.02, xanchor: 'right', yanchor: 'bottom' }
@@ -936,7 +968,7 @@ export default function PlotWidget({
           title: axisTitle(ylabel || ''),
           type: 'category',
           categoryorder: 'array',
-          categoryarray: labels,
+          categoryarray: [...labels].reverse(),
         },
       };
     }
@@ -964,7 +996,11 @@ export default function PlotWidget({
     if (!showAttribution || !text) return layout;
     const axisFs = Number(fontSize) || 11;
     const attrFs = Number(attrFontSize) || 8;
-    const wrapped = wrapAttribution(text, 52);
+    const marginL = Number(layout.margin?.l) || 0;
+    const marginR = Number(layout.margin?.r) || 0;
+    const plotW = plotWidthPx || Math.round((Number(figWidth) || 6) * 96);
+    const axesW = Math.max(48, plotW - marginL - marginR - 6);
+    const wrapped = wrapAttribution(text, axesW, attrFs);
     const nlines = wrapped.split('<br>').length;
     const xlabelRoom = Math.round(axisFs * 2.5 + 32);
     const attrRoom = nlines * (attrFs + 6) + 10;
@@ -977,14 +1013,14 @@ export default function PlotWidget({
           text: wrapped,
           xref: 'paper',
           yref: 'paper',
-          x: 0.5,
+          x: 0,
           y: 0,
-          xanchor: 'center',
+          xanchor: 'left',
           yanchor: 'top',
           yshift: -xlabelRoom,
           showarrow: false,
           font: { size: attrFs, color: '#143028', style: 'italic' },
-          align: 'center',
+          align: 'left',
         },
       ],
     };

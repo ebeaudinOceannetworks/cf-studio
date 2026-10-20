@@ -426,7 +426,7 @@ export default function MapView({
           </span>
         )}
       </div>
-      <MapContainer center={center} zoom={4} style={{ height: '100%', width: '100%' }}>
+      <MapContainer center={center} zoom={4} boxZoom={false} style={{ height: '100%', width: '100%' }}>
         <TileLayer
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           attribution="&copy; OpenStreetMap contributors"

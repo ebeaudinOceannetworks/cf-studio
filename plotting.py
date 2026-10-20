@@ -1,5 +1,3 @@
-import textwrap
-
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -13,7 +11,8 @@ from data import (
     as_str,
     cast_date,
     casts_by_time,
-    deepest_cast_per_station,
+    transect_cast_order,
+    order_names_like_selection,
     get_units,
     is_station_cast,
     match_casts,
@@ -90,28 +89,133 @@ def apply_export_chrome(
         for t in ax.texts
     )
     attr_fs = float(attribution_fontsize or 8)
-    wrapped = ""
     bottom = 0.08 if has_top_labels else 0.06
     top = 0.82 if has_top_labels else 0.94
-    if attribution:
-        char_w_in = max(attr_fs * 0.42, 1.0) / 72
-        wrap_chars = max(28, int((fig.get_figwidth() * 0.9) / char_w_in))
-        wrapped = "\n".join(textwrap.wrap(str(attribution), width=wrap_chars)) or str(attribution)
-        nlines = wrapped.count("\n") + 1
-        bottom = max(0.14, 0.055 + 0.038 * nlines)
-    fig.tight_layout(rect=[0.02, bottom, 0.98, top])
-    if wrapped:
-        fig.text(
-            0.5,
-            0.02,
+    if attribution and fig.axes:
+        rough_in = max(fig.get_figwidth() * 0.55, 1.4)
+        char_w_in = max(attr_fs * 0.5, 1.0) / 72.0
+        est_lines = max(1, int(len(str(attribution)) / max(8, rough_in / char_w_in)) + 1)
+        line_in = (attr_fs * 1.35) / 72.0
+        bottom = max(bottom, (est_lines * line_in + 0.18) / max(fig.get_figheight(), 0.1))
+        fig.tight_layout(rect=[0.02, bottom, 0.98, top])
+        fig.canvas.draw()
+        wrapped = _wrap_attribution(fig, str(attribution), attr_fs)
+        footer_px = _text_block_height_px(fig, wrapped, attr_fs) + 10
+        bottom = max(bottom, footer_px / fig.bbox.height)
+        fig.tight_layout(rect=[0.02, bottom, 0.98, top])
+        fig.canvas.draw()
+        wrapped = _wrap_attribution(fig, str(attribution), attr_fs)
+        x0, _x1 = _axes_xspan(fig)
+        ann = fig.text(
+            x0,
+            6 / fig.bbox.height,
             wrapped,
-            ha="center",
+            ha="left",
             va="bottom",
             fontsize=attr_fs,
             color=fg,
             style="italic",
         )
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+        floor = _xlabel_floor_px(fig, renderer)
+        text_top = ann.get_window_extent(renderer).y1
+        if floor < text_top + 6:
+            extra = (text_top + 10 - floor) / fig.bbox.height
+            bottom = min(0.55, bottom + extra)
+            ann.remove()
+            fig.tight_layout(rect=[0.02, bottom, 0.98, top])
+            x0, _x1 = _axes_xspan(fig)
+            fig.text(
+                x0,
+                6 / fig.bbox.height,
+                wrapped,
+                ha="left",
+                va="bottom",
+                fontsize=attr_fs,
+                color=fg,
+                style="italic",
+            )
+    elif fig.axes:
+        fig.tight_layout(rect=[0.02, bottom, 0.98, top])
     return fig
+
+
+def _wrap_attribution(fig, text, fontsize):
+    x0, x1 = _axes_xspan(fig)
+    width_px = max(20.0, (x1 - x0) * fig.bbox.width * 0.98)
+    return _wrap_text_px(fig, text, fontsize, width_px)
+
+
+def _text_block_height_px(fig, wrapped, fontsize):
+    probe = fig.text(0, 0, wrapped, fontsize=fontsize, style="italic")
+    renderer = fig.canvas.get_renderer()
+    height = probe.get_window_extent(renderer).height
+    probe.remove()
+    return height
+
+
+def _xlabel_floor_px(fig, renderer):
+    floors = []
+    for ax in _content_axes(fig):
+        if ax.xaxis.label.get_text():
+            floors.append(ax.xaxis.label.get_window_extent(renderer).y0)
+        for tick in ax.get_xticklabels():
+            if not tick.get_visible() or not tick.get_text():
+                continue
+            ext = tick.get_window_extent(renderer)
+            if ext.width > 0 and ext.height > 0:
+                floors.append(ext.y0)
+    return min(floors) if floors else 0.0
+
+
+def _content_axes(fig):
+    visible = [
+        ax for ax in fig.axes
+        if ax.get_visible() and ax.get_position().width > 0 and ax.get_position().height > 0
+    ]
+    if not visible:
+        return []
+    widest = max(ax.get_position().width for ax in visible)
+    main = [ax for ax in visible if ax.get_position().width >= widest * 0.45]
+    return main or visible
+
+
+def _axes_xspan(fig):
+    axes = _content_axes(fig)
+    if not axes:
+        return 0.08, 0.92
+    return (
+        min(ax.get_position().x0 for ax in axes),
+        max(ax.get_position().x1 for ax in axes),
+    )
+
+
+def _wrap_text_px(fig, text, fontsize, width_px):
+    probe = fig.text(0, 0, "", fontsize=fontsize, style="italic")
+    renderer = fig.canvas.get_renderer()
+
+    def width_of(sample):
+        probe.set_text(sample)
+        return probe.get_window_extent(renderer).width
+
+    words = str(text).split()
+    if not words:
+        probe.remove()
+        return ""
+    lines = []
+    line = ""
+    for word in words:
+        nxt = f"{line} {word}".strip()
+        if line and width_of(nxt) > width_px:
+            lines.append(line)
+            line = word
+        else:
+            line = nxt
+    if line:
+        lines.append(line)
+    probe.remove()
+    return "\n".join(lines) or str(text)
 
 
 def _new_axes(figsize, ax=None):
@@ -179,7 +283,7 @@ def overview_casts_plot(
                 color=color,
                 linewidth=line_width,
                 zorder=3,
-                label=f"Most recent ({latest_label})",
+                label=f"Newest ({latest_label})",
             )
         else:
             ax.plot(vals[mask], depths[mask], color=color, linewidth=0.9, alpha=0.35, zorder=1)
@@ -302,7 +406,7 @@ def transect_plot(
         )
         return fig
 
-    deepest_casts = deepest_cast_per_station(ds, selected_casts, var)
+    deepest_casts = transect_cast_order(ds, selected_ids, selected_casts, var)
     if len(deepest_casts) < 2:
         ax.text(
             0.5,
@@ -561,7 +665,7 @@ def sampling_history_plot(ds, selected_ids=None, date_filter="All", figsize=(8, 
             continue
         seen.add(name)
         station_names.append(name)
-    station_names = sorted(station_names)
+    station_names = order_names_like_selection(station_names, ids)
 
     for i, station_name in enumerate(station_names):
         times = []
@@ -614,6 +718,7 @@ def sampling_history_plot(ds, selected_ids=None, date_filter="All", figsize=(8, 
 
     ax.set_yticks(np.arange(len(labels)))
     ax.set_yticklabels(labels)
+    ax.invert_yaxis()
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%b\n%Y"))
     ax.xaxis.set_major_locator(mdates.MonthLocator(interval=3))
     ax.set_title(f"Total # of casts: {int(ds_sub.cast.size)}")

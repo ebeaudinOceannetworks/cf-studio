@@ -107,13 +107,7 @@ def ensure_selection(selected_ids):
             except Exception as err:
                 print(f"Skipped {os.path.basename(path)}: {err}")
         ds_list = [file_cache[p] for p in paths if p in file_cache]
-        if not ds_list:
-            ds_all = None
-            return None
-        if len(ds_list) == 1:
-            ds_all = ds_list[0]
-        else:
-            ds_all = xr.concat(ds_list, dim="cast", join="outer").sortby("depth")
+        ds_all = data.combine_casts(ds_list)
         return ds_all
 
 
@@ -401,7 +395,7 @@ def plot_transect_payload(req: PlotStyle, attribution_text: str):
     if len(selected_casts) < 2:
         return {"error": f"Transect requires at least 2 casts on date: {date_filter}. Found {len(selected_casts)}."}
 
-    deepest = data.deepest_cast_per_station(ds_all, selected_casts, req.variable)
+    deepest = data.transect_cast_order(ds_all, req.selected_ids, selected_casts, req.variable)
     if len(deepest) < 2:
         return {"error": "Transect needs at least 2 selected stations."}
     data_transect = ds_all.sel(cast=deepest).transpose("depth", "cast")
@@ -534,7 +528,7 @@ def plot_history_payload(req: PlotStyle, attribution_text: str):
         else:
             unassigned.append(t)
 
-    labels = sorted(rows)
+    labels = data.order_names_like_selection(list(rows), req.selected_ids)
     series = [{"name": name, "times": rows[name], "kind": "station"} for name in labels]
     if unassigned:
         series.append({"name": "Unassigned", "times": unassigned, "kind": "unassigned"})

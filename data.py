@@ -349,6 +349,55 @@ def resolve_transect_date(ds, selected_ids, var, date_filter):
     return str(pd.Series(all_dates).mode()[0])
 
 
+def _cast_max_depth(ds, cast_id, var=None):
+    cast_ds = ds.sel(cast=cast_id)
+    depths = np.ravel(cast_ds.depth.values)
+    if var is not None and var in cast_ds:
+        vals = np.ravel(cast_ds[var].values)
+        mask = np.isfinite(depths) & np.isfinite(vals)
+    else:
+        mask = np.isfinite(depths)
+    if not np.any(mask):
+        return float("-inf")
+    return float(np.max(depths[mask]))
+
+
+def transect_cast_order(ds, selected_ids, cast_ids, var=None):
+    """One cast per selected station or cast, in selection order.
+
+    A station id uses the deepest cast at that station. A cast id uses that cast.
+    """
+    by_id = {}
+    by_station = {}
+    for c in cast_ids:
+        by_id[str(c)] = c
+        name = as_str(ds.sel(cast=c).station_name.values)
+        by_station.setdefault(name, []).append(c)
+
+    ordered = []
+    seen = set()
+    for sid in selected_ids or []:
+        key = str(sid)
+        if key in by_id:
+            chosen = by_id[key]
+        else:
+            pool = by_station.get(key) or []
+            if not pool:
+                continue
+            chosen = max(pool, key=lambda c: _cast_max_depth(ds, c, var))
+        chosen_key = str(chosen)
+        if chosen_key in seen:
+            continue
+        seen.add(chosen_key)
+        ordered.append(chosen)
+    return ordered
+
+
+def order_names_like_selection(names, selected_ids):
+    rank = {str(sid): i for i, sid in enumerate(selected_ids or [])}
+    return sorted(names, key=lambda name: (rank.get(str(name), len(rank)), str(name)))
+
+
 def deepest_cast_per_station(ds, cast_ids, var=None):
     best = {}
     order = []
@@ -377,58 +426,193 @@ def transect_distances(lats, lons):
     return dist
 
 
-def cor2xr(cor_file):
-    base_name = os.path.basename(cor_file).replace(".cor", "").replace(".COR", "")
-    with open(cor_file, "r", encoding="utf-8", errors="ignore") as f:
-        lines = f.readlines()
+_BLANK_META = {"", "nan", "none"}
 
-    ds_list = []
-    current_meta = {
-        "station_name": base_name,
-        "cast_name": base_name,
+
+def _blank_meta(val):
+    return str(val or "").strip().lower() in _BLANK_META
+
+
+def _fresh_file_meta():
+    return {
+        "station_name": "",
+        "cast_name": "",
         "cast_type": "unassigned",
         "citation": "",
         "lat": np.nan,
         "lon": np.nan,
+        "processing_time": pd.NaT,
+        "start_header": "",
     }
+
+
+def _reset_cast_fields(meta):
+    meta["cast_name"] = ""
+    meta["lat"] = np.nan
+    meta["lon"] = np.nan
+    meta["processing_time"] = pd.NaT
+    meta["start_header"] = ""
+
+
+def _consume_header_line(meta, line_str):
+    """Apply one metadata line from the .cor body. Returns True if the line was a header."""
+    if line_str.startswith("Deployment "):
+        _reset_cast_fields(meta)
+        return True
+    if line_str.startswith("Station name:"):
+        st_val = line_str.split(":", 1)[1].strip()
+        meta["station_name"] = st_val
+        meta["cast_type"] = "station" if st_val.startswith("CF") else "unassigned"
+        return True
+    if line_str.startswith("Cast name:"):
+        meta["cast_name"] = line_str.split(":", 1)[1].strip()
+        return True
+    if line_str.startswith("Citation:"):
+        meta["citation"] = line_str.split(":", 1)[1].strip()
+        return True
+    if line_str.startswith("LatitudeCastStart:"):
+        try:
+            meta["lat"] = float(line_str.split(":", 1)[1].split(";")[0].strip())
+        except Exception:
+            pass
+        return True
+    if line_str.startswith("LongitudeCastStart:"):
+        try:
+            meta["lon"] = float(line_str.split(":", 1)[1].split(";")[0].strip())
+        except Exception:
+            pass
+        return True
+    if line_str.startswith("ProcessingDate:"):
+        raw = line_str.split(":", 1)[1].split(";")[0].strip()
+        meta["processing_time"] = pd.to_datetime(raw, utc=True, errors="coerce")
+        return True
+    if line_str.startswith("StartDateCast:"):
+        meta["start_header"] = line_str.split(":", 1)[1].split(";")[0].strip()
+        return True
+    return False
+
+
+def cast_identity(meta, start_time=None):
+    """Stable cast id from file metadata. The filename is never part of the id."""
+    name = str(meta.get("cast_name") or "").strip()
+    if not _blank_meta(name):
+        return name
+    parts = []
+    station = str(meta.get("station_name") or "").strip()
+    if not _blank_meta(station):
+        parts.append(station)
+    start = str(meta.get("start_header") or "").strip()
+    if start:
+        parts.append(start)
+    elif start_time is not None and not pd.isna(start_time):
+        parts.append(str(pd.to_datetime(start_time)))
+    lat, lon = meta.get("lat"), meta.get("lon")
+    if isinstance(lat, (int, float)) and lat == lat:
+        parts.append(f"{float(lat):.5f}")
+    if isinstance(lon, (int, float)) and lon == lon:
+        parts.append(f"{float(lon):.5f}")
+    return "|".join(parts)
+
+
+def _file_mtime(path):
+    try:
+        return float(os.path.getmtime(path))
+    except OSError:
+        return 0.0
+
+
+def _as_utc_timestamp(val):
+    if val is None:
+        return pd.NaT
+    ts = pd.to_datetime(val, utc=True, errors="coerce")
+    if isinstance(ts, pd.DatetimeIndex):
+        ts = ts[0] if len(ts) else pd.NaT
+    return ts
+
+
+def _rank_key(processing_time, source_mtime, order):
+    ts = _as_utc_timestamp(processing_time)
+    proc = int(ts.value) if pd.notna(ts) else -1
+    try:
+        mtime = float(source_mtime)
+    except (TypeError, ValueError):
+        mtime = 0.0
+    if mtime != mtime:
+        mtime = 0.0
+    return (proc, mtime, int(order))
+
+
+def _processing_coord(val):
+    ts = _as_utc_timestamp(val)
+    if pd.isna(ts):
+        return np.datetime64("NaT")
+    return np.datetime64(ts.to_datetime64())
+
+
+def dedupe_casts(ds):
+    """Keep one row per cast id. A later processing date wins; file mtime breaks ties."""
+    if ds is None:
+        return ds
+    n = int(ds.sizes.get("cast", 0))
+    if n <= 1:
+        return ds
+    ids = [str(c) for c in np.ravel(ds.cast.values)]
+    if len(ids) == len(set(ids)) and all(ids):
+        return ds
+    proc = np.ravel(ds.processing_time.values) if "processing_time" in ds.coords else None
+    mtimes = np.ravel(ds.source_mtime.values) if "source_mtime" in ds.coords else None
+    best = {}
+    for i, cid in enumerate(ids):
+        if not cid:
+            continue
+        rank = _rank_key(None if proc is None else proc[i], 0.0 if mtimes is None else mtimes[i], i)
+        prev = best.get(cid)
+        if prev is None or rank >= prev[0]:
+            best[cid] = (rank, i)
+    keep = []
+    seen = set()
+    for cid in ids:
+        if not cid or cid in seen or cid not in best:
+            continue
+        seen.add(cid)
+        keep.append(best[cid][1])
+    if not keep:
+        return ds.isel(cast=slice(0, 0))
+    return ds.isel(cast=keep)
+
+
+def combine_casts(ds_list):
+    usable = [ds for ds in ds_list if ds is not None and int(ds.sizes.get("cast", 0)) > 0]
+    if not usable:
+        return None
+    if len(usable) == 1:
+        return dedupe_casts(usable[0])
+    merged = xr.concat(usable, dim="cast", join="outer").sortby("depth")
+    return dedupe_casts(merged)
+
+
+def cor2xr(cor_file):
+    base_name = os.path.basename(cor_file)
+    source_mtime = _file_mtime(cor_file)
+    with open(cor_file, "r", encoding="utf-8", errors="ignore") as f:
+        lines = f.readlines()
+
+    ds_list = []
+    current_meta = _fresh_file_meta()
 
     columns = []
     deployment_rows = []
     inside_data_block = False
-    cast_counter = 0
 
     for line in lines:
         line_str = line.strip()
         if not line_str:
             continue
 
-        if line_str.startswith("Station name:"):
-            st_val = line_str.split(":", 1)[1].strip()
-            if st_val:
-                current_meta["station_name"] = st_val
-                current_meta["cast_type"] = "station" if st_val.startswith("CF") else "unassigned"
+        if _consume_header_line(current_meta, line_str):
+            continue
 
-        elif line_str.startswith("Cast name:"):
-            c_val = line_str.split(":", 1)[1].strip()
-            if c_val:
-                current_meta["cast_name"] = c_val
-
-        elif line_str.startswith("Citation:"):
-            current_meta["citation"] = line_str.split(":", 1)[1].strip()
-
-        elif line_str.startswith("LatitudeCastStart:"):
-            try:
-                current_meta["lat"] = float(line_str.split(":", 1)[1].split(";")[0].strip())
-            except Exception:
-                pass
-
-        elif line_str.startswith("LongitudeCastStart:"):
-            try:
-                current_meta["lon"] = float(line_str.split(":", 1)[1].split(";")[0].strip())
-            except Exception:
-                pass
-
-        elif line_str.startswith("Column"):
+        if line_str.startswith("Column"):
             raw_cols = line_str.split(",")
             parsed_cols = []
             for c in raw_cols:
@@ -444,6 +628,7 @@ def cor2xr(cor_file):
         elif "------ END DATA ------" in line_str:
             inside_data_block = False
             if not deployment_rows:
+                _reset_cast_fields(current_meta)
                 continue
 
             sample_row = deployment_rows[0]
@@ -469,13 +654,15 @@ def cor2xr(cor_file):
                 if not np.isnan(parsed_lon):
                     lon_val = float(parsed_lon)
 
-            start_time = np.datetime64(pd.Timestamp.now())
+            start_time = np.datetime64("NaT")
+            start_time_raw = None
             if time_col:
                 t_series = pd.to_datetime(
                     df[time_col], format="%Y%m%dT%H%M%S.%fZ", errors="coerce", utc=True
                 ).dropna()
                 if not t_series.empty:
-                    start_time = np.datetime64(t_series.iloc[0].tz_convert(None))
+                    start_time_raw = t_series.iloc[0]
+                    start_time = np.datetime64(start_time_raw.tz_convert(None))
 
             data_vars = {}
             for col in df.columns:
@@ -489,8 +676,10 @@ def cor2xr(cor_file):
             )
             community = extract_community_from_citation(current_meta["citation"])
 
-            cast_counter += 1
-            unique_cast_id = f"{base_name}_d{cast_counter}"
+            unique_cast_id = cast_identity(current_meta, start_time_raw)
+            if not unique_cast_id:
+                _reset_cast_fields(current_meta)
+                continue
 
             ds = xr.Dataset(
                 data_vars=data_vars,
@@ -500,17 +689,20 @@ def cor2xr(cor_file):
                     "station_name": ("cast", [str(current_meta["station_name"])]),
                     "station": ("cast", [str(current_meta["station_name"])]),
                     "cast_type": ("cast", [str(current_meta["cast_type"])]),
-                    "cast_name": ("cast", [str(current_meta["cast_name"])]),
+                    "cast_name": ("cast", [str(current_meta["cast_name"] or unique_cast_id)]),
                     "community": ("cast", [str(community)]),
                     "time": ("cast", [start_time]),
                     "lat": ("cast", [lat_val]),
                     "lon": ("cast", [lon_val]),
+                    "processing_time": ("cast", [_processing_coord(current_meta["processing_time"])]),
+                    "source_mtime": ("cast", [source_mtime]),
                 },
             )
 
             _, unique_idx = np.unique(ds.depth.values, return_index=True)
             ds = ds.isel(depth=unique_idx).sortby("depth")
             ds_list.append(ds)
+            _reset_cast_fields(current_meta)
 
         elif inside_data_block:
             items = [i.strip() for i in line_str.split(",")] if "," in line_str else line_str.split()
@@ -529,7 +721,8 @@ def cor2xr(cor_file):
         _, u_idx = np.unique(ds_list[i].depth.values, return_index=True)
         ds_list[i] = ds_list[i].isel(depth=u_idx).sortby("depth")
 
-    return xr.concat(ds_list, dim="cast", data_vars="all", join="outer")
+    merged = xr.concat(ds_list, dim="cast", data_vars="all", join="outer")
+    return dedupe_casts(merged)
 
 
 def parse_cor(cor_file):
@@ -555,9 +748,10 @@ def concatenate_casts(cor_files):
             continue
     if not ds_list:
         raise ValueError("No valid .cor files could be loaded.")
-    if len(ds_list) == 1:
-        return ds_list[0]
-    return xr.concat(ds_list, dim="cast", join="outer").sortby("depth")
+    combined = combine_casts(ds_list)
+    if combined is None or int(combined.sizes.get("cast", 0)) == 0:
+        raise ValueError("No valid .cor files could be loaded.")
+    return combined
 
 
 def _parse_data_items(line_str):
@@ -599,48 +793,22 @@ def _row_time_lat_lon(columns, row, lat_val, lon_val):
 
 
 def index_cor_file(cor_file):
-    base_name = os.path.basename(cor_file).replace(".cor", "").replace(".COR", "")
-    current_meta = {
-        "station_name": base_name,
-        "cast_name": base_name,
-        "cast_type": "unassigned",
-        "citation": "",
-        "lat": np.nan,
-        "lon": np.nan,
-    }
+    base_name = os.path.basename(cor_file)
+    source_mtime = _file_mtime(cor_file)
+    current_meta = _fresh_file_meta()
     columns = []
     entries = []
     inside_data_block = False
     first_row = None
-    cast_counter = 0
 
     with open(cor_file, "r", encoding="utf-8", errors="ignore") as f:
         for line in f:
             line_str = line.strip()
             if not line_str:
                 continue
-            if line_str.startswith("Station name:"):
-                st_val = line_str.split(":", 1)[1].strip()
-                if st_val:
-                    current_meta["station_name"] = st_val
-                    current_meta["cast_type"] = "station" if st_val.startswith("CF") else "unassigned"
-            elif line_str.startswith("Cast name:"):
-                c_val = line_str.split(":", 1)[1].strip()
-                if c_val:
-                    current_meta["cast_name"] = c_val
-            elif line_str.startswith("Citation:"):
-                current_meta["citation"] = line_str.split(":", 1)[1].strip()
-            elif line_str.startswith("LatitudeCastStart:"):
-                try:
-                    current_meta["lat"] = float(line_str.split(":", 1)[1].split(";")[0].strip())
-                except Exception:
-                    pass
-            elif line_str.startswith("LongitudeCastStart:"):
-                try:
-                    current_meta["lon"] = float(line_str.split(":", 1)[1].split(";")[0].strip())
-                except Exception:
-                    pass
-            elif line_str.startswith("Column"):
+            if _consume_header_line(current_meta, line_str):
+                continue
+            if line_str.startswith("Column"):
                 raw_cols = line_str.split(",")
                 parsed_cols = []
                 for c in raw_cols:
@@ -653,28 +821,33 @@ def index_cor_file(cor_file):
                 first_row = None
             elif "------ END DATA ------" in line_str:
                 inside_data_block = False
-                cast_counter += 1
                 lat_val, lon_val, start_time = _row_time_lat_lon(
                     columns, first_row, current_meta["lat"], current_meta["lon"]
                 )
+                cast_id = cast_identity(current_meta, start_time)
                 community = extract_community_from_citation(current_meta["citation"])
                 day = "Unknown"
                 if start_time is not None:
                     local = local_timestamp(start_time, lon=lon_val, lat=lat_val, community=community)
                     if not pd.isna(local):
                         day = str(local.date())
-                entries.append({
-                    "path": cor_file,
-                    "cast_id": f"{base_name}_d{cast_counter}",
-                    "station_name": str(current_meta["station_name"]),
-                    "cast_name": str(current_meta["cast_name"]),
-                    "cast_type": str(current_meta["cast_type"]),
-                    "community": str(community),
-                    "lat": lat_val,
-                    "lon": lon_val,
-                    "date": day,
-                    "columns": list(columns),
-                })
+                proc = current_meta["processing_time"]
+                if cast_id:
+                    entries.append({
+                        "path": cor_file,
+                        "cast_id": cast_id,
+                        "station_name": str(current_meta["station_name"]),
+                        "cast_name": str(current_meta["cast_name"] or cast_id),
+                        "cast_type": str(current_meta["cast_type"]),
+                        "community": str(community),
+                        "lat": lat_val,
+                        "lon": lon_val,
+                        "date": day,
+                        "columns": list(columns),
+                        "processing_time": None if pd.isna(proc) else proc,
+                        "source_mtime": source_mtime,
+                    })
+                _reset_cast_fields(current_meta)
             elif inside_data_block and first_row is None:
                 first_row = _parse_data_items(line_str)
 
@@ -701,27 +874,47 @@ def index_folder(path_dir):
     if not cor_files:
         raise ValueError(f"No .cor files found in {path_dir}")
 
-    catalog = []
-    variables = set()
+    by_id = {}
+    order = []
+    seen_n = 0
+    seq = 0
     print(f"Indexing {len(cor_files)} files...")
     for i, cor_file in enumerate(cor_files):
         try:
-            for entry in index_cor_file(cor_file):
-                catalog.append(entry)
-                for col in entry.get("columns") or []:
-                    if col and col.lower() not in INDEX_SKIP_COLS:
-                        variables.add(col)
+            file_entries = index_cor_file(cor_file)
         except Exception as file_err:
             print(
                 f"Skipped unreadable file [{i + 1}/{len(cor_files)}] "
                 f"{os.path.basename(cor_file)}: {file_err}"
             )
             continue
+        for entry in file_entries:
+            seen_n += 1
+            cast_id = entry.get("cast_id") or ""
+            if not cast_id:
+                continue
+            seq += 1
+            rank = _rank_key(entry.get("processing_time"), entry.get("source_mtime"), seq)
+            prev = by_id.get(cast_id)
+            if prev is None:
+                by_id[cast_id] = (rank, entry)
+                order.append(cast_id)
+            elif rank >= prev[0]:
+                by_id[cast_id] = (rank, entry)
+    catalog = [by_id[cast_id][1] for cast_id in order]
     if not catalog:
         raise ValueError("No valid .cor files could be indexed from the folder.")
+    variables = set()
+    for entry in catalog:
+        for col in entry.get("columns") or []:
+            if col and col.lower() not in INDEX_SKIP_COLS:
+                variables.add(col)
     if {"Oxygen Saturation", "Temperature", "Practical Salinity", "Pressure"} <= variables:
         variables.add("Dissolved Oxygen")
-    print(f"Indexed {len(catalog)} casts in {len({e['path'] for e in catalog})} files.")
+    dropped = seen_n - len(catalog)
+    print(f"Indexed {len(catalog)} unique casts in {len({e['path'] for e in catalog})} files.")
+    if dropped:
+        print(f"Ignored {dropped} duplicate cast(s) that share a cast id.")
     return catalog, sorted(variables)
 
 
